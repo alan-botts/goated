@@ -4,43 +4,43 @@
 
 ```
 .                        # Go module root
-├── cmd/goated/cli/      # CLI commands (Cobra) — 26 .go files
-├── internal/
-│   ├── agent/           # Provider-neutral runtime contracts & envelope encoding
-│   ├── app/             # Config loading (goated.json + env vars + creds)
-��   ├── claude/          # Claude headless runtime (claude -p --resume)
-│   ├── claudetui/       # Claude TUI runtime (tmux bridge)
-│   ��── codex/           # Codex headless runtime (codex exec)
-│   ├── codextui/        # Codex TUI runtime (tmux bridge)
-│   ├── cron/            # Cron runner (per-minute tick, timezone-aware)
-│   ├─�� db/              # BoltDB persistence (crons, subagent runs, channels, meta)
-│   ├── gateway/         # Gateway service (message routing, auto-compact, queueing)
-│   ├── goatlog/         # Daily-rotating log writer
-│   ├── msglog/          # Message logging, redaction, session tracking, replay
-│   ├── pydict/          # Python dict literal encoding/parsing
-│   ├── runtime/         # Runtime factory (selects provider from config)
-│   ├── sessionname/     # Consistent tmux session naming
-│   ├── slack/           # Slack connector (Socket Mode + Web API)
-│   ���── subagent/        # Headless subagent launcher & completion handler
-│   ├── telegram/        # Telegram connector (polling + webhook)
-│   ├── tmux/            # Low-level tmux operations (paste, capture, detect)
-│   └── util/            # Markdown conversion, sanitization, text helpers
-├── workspace/           # Agent working directory
-│   ├── GOATED.md        # Shared runtime contract
-│   ├── CLAUDE.md        # Claude compatibility shim → AGENTS.md
-│   ├── TOOLS.md         # Guide for building custom CLI tools
-│   ├── PYDICT_FORMAT.md # Envelope format spec
-│   ├── _self.example/   # Bootstrap template for new agents
-│   └── self/            # Private agent data (gitignored, separate repo)
-├── scripts/
-│   ├── setup_machine.sh # Install Go, tmux, runtime CLI; validate environment
-│   └── watchdog.sh      # Cron watchdog (every 2 min, auto-restart daemon)
-├── docs/
-│   ���── PERFORMANCE.md   # Goated vs OpenClaw comparison
-│   └── OPENCLAW_MIGRATION.md # Migration guide
-├── build.sh             # Builds both binaries
-├── main.go              # Entry point (delegates to cmd/goated/cli)
-└── goated.json.example  # Configuration template
++---- cmd/goated/cli/      # CLI commands (Cobra) -- 26 .go files
++---- internal/
+|   +---- agent/           # Provider-neutral runtime contracts & envelope encoding
+|   +---- app/             # Config loading (goated.json + env vars + creds)
+   +---- claude/          # Claude headless runtime (claude -p --resume)
+|   +---- claudetui/       # Claude TUI runtime (tmux bridge)
+|   -- codex/           # Codex headless runtime (codex exec)
+|   +---- codextui/        # Codex TUI runtime (tmux bridge)
+|   +---- cron/            # Cron runner (per-minute tick, timezone-aware)
+|   +--- db/              # BoltDB persistence (crons, subagent runs, channels, meta)
+|   +---- gateway/         # Gateway service (message routing, auto-compact, queueing)
+|   +---- goatlog/         # Daily-rotating log writer
+|   +---- msglog/          # Message logging, redaction, session tracking, replay
+|   +---- pydict/          # Python dict literal encoding/parsing
+|   +---- runtime/         # Runtime factory (selects provider from config)
+|   +---- sessionname/     # Consistent tmux session naming
+|   +---- slack/           # Slack connector (Socket Mode + Web API)
+|   -- subagent/        # Headless subagent launcher & completion handler
+|   +---- telegram/        # Telegram connector (polling + webhook)
+|   +---- tmux/            # Low-level tmux operations (paste, capture, detect)
+|   +---- util/            # Markdown conversion, sanitization, text helpers
++---- workspace/           # Agent working directory
+|   +---- GOATED.md        # Shared runtime contract
+|   +---- CLAUDE.md        # Claude compatibility shim -> AGENTS.md
+|   +---- TOOLS.md         # Guide for building custom CLI tools
+|   +---- PYDICT_FORMAT.md # Envelope format spec
+|   +---- _self.example/   # Bootstrap template for new agents
+|   +---- self/            # Private agent data (gitignored, separate repo)
++---- scripts/
+|   +---- setup_machine.sh # Install Go, tmux, runtime CLI; validate environment
+|   +---- watchdog.sh      # Cron watchdog (every 2 min, auto-restart daemon)
++---- docs/
+|   -- PERFORMANCE.md   # Goated vs OpenClaw comparison
+|   +---- OPENCLAW_MIGRATION.md # Migration guide
++---- build.sh             # Builds both binaries
++---- main.go              # Entry point (delegates to cmd/goated/cli)
++---- goated.json.example  # Configuration template
 ```
 
 ## Binaries
@@ -55,21 +55,21 @@ Both are the same Go binary with different names. Statically compiled, no runtim
 ## How it works
 
 ```
-┌──────────┐         ┌──��───────────┐  prompt/paste ┌──���───────────────────────┐
-│  Slack/  │ ──────> │   Gateway    │ ───────────> │  Active Runtime          ���
-│ Telegram │         │   Daemon     │              │  (headless or tmux)      │
-│   User   │ <─────�� │              │ <───��──────  │                          │
-└────────��─┘         └────────────���─┘  exec        └──────────────────────────┘
-    ^                    │                           │            │
-    │                    │                           │            │ ./goat spawn-subagent
-    │                    │         ./goat send_user_ ���            │
-    │                    │                 message   v            v
-    └──���─────────────────┼───────���────────────────────      ┌──────���─────────────┐
-                         │                                  │  Subagent          │
-                    ��────v─────┐                            │ (headless runtime) │
-                    │   Cron   │ ──────��─────────────────>  │                    │
-                    ��  Runner  │  spawn                     └────────────────────┘
-                    └──────────┘
++----------+         +-------------+  prompt/paste +-------------------------+
+|  Slack/  | ------> |   Gateway    | -----------> |  Active Runtime          
+| Telegram |         |   Daemon     |              |  (headless or tmux)      |
+|   User   | <----- |              | <---------  |                          |
++-----------+         +---------------+  exec        +----------------------------+
+    ^                    |                           |            |
+    |                    |                           |            | ./goat spawn-subagent
+    |                    |         ./goat send_user_             |
+    |                    |                 message   v            v
+    +---------------------+---------------------------      +-------------------+
+                         |                                  |  Subagent          |
+                    ----v-----+                            | (headless runtime) |
+                    |   Cron   | ----------------------->  |                    |
+                      Runner  |  spawn                     +----------------------+
+                    +------------+
 ```
 
 **Message flow:**
@@ -84,7 +84,7 @@ Both are the same Go binary with different names. Statically compiled, no runtim
 8. The `goat` CLI converts markdown to platform format (Slack mrkdwn / Telegram HTML) and posts it
 9. On Slack, the thinking indicator is deleted; if the runtime is still busy, a new one is posted and reaped on idle
 
-**Key design choice:** the runtime sends its own replies. The gateway doesn't scrape output from tmux — the runtime is instructed to pipe its response through the `goat` CLI.
+**Key design choice:** the runtime sends its own replies. The gateway doesn't scrape output from tmux -- the runtime is instructed to pipe its response through the `goat` CLI.
 
 **Headless runtimes** use process-per-message execution. **TUI runtimes** (`claude_tui`, `codex_tui`) run inside tmux. Subagents and cron jobs always run headlessly. Each run is tracked in BoltDB with PID and status.
 
@@ -92,7 +92,7 @@ Both are the same Go binary with different names. Statically compiled, no runtim
 
 ## Module reference
 
-### `cmd/goated/cli/` — CLI commands
+### `cmd/goated/cli/` -- CLI commands
 
 All commands use Cobra and are registered into `rootCmd` in `root.go`.
 
@@ -117,76 +117,76 @@ All commands use Cobra and are registered into `rootCmd` in `root.go`.
 | `slack.go` | `slack history` | Slack message inspection with pagination |
 | `helpers.go` | `prompt()`, `promptSecret()` | Interactive CLI I/O utilities |
 
-### `internal/agent/` — Runtime contracts & envelope encoding
+### `internal/agent/` -- Runtime contracts & envelope encoding
 
-**`types.go`** — Provider-neutral abstractions:
+**`types.go`** -- Provider-neutral abstractions:
 
-- `RuntimeProvider` — string enum: `"claude"`, `"codex"`, `"claude_tui"`, `"codex_tui"`
-- `SessionRuntime` interface — `EnsureSession`, `StopSession`, `SendUserPrompt`, `SendBatchPrompt`, `GetHealth`, `GetContextEstimate`, `WaitForAwaitingInput`, `DetectRetryableError`
-- `HeadlessRuntime` interface — `RunSync`, `RunBackground`
-- `Runtime` interface — combines `Session()` and `Headless()`
+- `RuntimeProvider` -- string enum: `"claude"`, `"codex"`, `"claude_tui"`, `"codex_tui"`
+- `SessionRuntime` interface -- `EnsureSession`, `StopSession`, `SendUserPrompt`, `SendBatchPrompt`, `GetHealth`, `GetContextEstimate`, `WaitForAwaitingInput`, `DetectRetryableError`
+- `HeadlessRuntime` interface -- `RunSync`, `RunBackground`
+- `Runtime` interface -- combines `Session()` and `Headless()`
 
-**`envelope.go`** — Encodes messages as Python dict literals for delivery to the runtime:
+**`envelope.go`** -- Encodes messages as Python dict literals for delivery to the runtime:
 
-- `BuildPromptEnvelope()` — single message with attachments
-- `BuildBatchEnvelope()` — multi-message batch
-- `BuildSystemNoticeEnvelope()` — internal notices (cron results, subagent completions)
+- `BuildPromptEnvelope()` -- single message with attachments
+- `BuildBatchEnvelope()` -- multi-message batch
+- `BuildSystemNoticeEnvelope()` -- internal notices (cron results, subagent completions)
 
-**`sent_message_log.go`** — Tracks messages sent by subagents via `GOATED_SENT_MESSAGE` log markers.
+**`sent_message_log.go`** -- Tracks messages sent by subagents via `GOATED_SENT_MESSAGE` log markers.
 
-### `internal/gateway/` — Message routing & service
+### `internal/gateway/` -- Message routing & service
 
-**`service.go`** — Core message router:
+**`service.go`** -- Core message router:
 
-- `Service` struct — holds session runtime, store, message logger, drain context
-- `HandleMessage()` — routes user messages to the active runtime
-- `HandleBatchMessage()` — multi-message delivery
-- `WaitInflight()` — blocks until all in-flight messages complete (graceful shutdown)
+- `Service` struct -- holds session runtime, store, message logger, drain context
+- `HandleMessage()` -- routes user messages to the active runtime
+- `HandleBatchMessage()` -- multi-message delivery
+- `WaitInflight()` -- blocks until all in-flight messages complete (graceful shutdown)
 - Handles slash commands: `/clear`, `/chatid`, `/context`, `/schedule`
 - Auto-compact: checks context usage every 5 messages, compacts at >80%
 - Queues messages during compaction
 
-**`types.go`** — `IncomingMessage`, `Responder`, `MediaResponder` interfaces.
+**`types.go`** -- `IncomingMessage`, `Responder`, `MediaResponder` interfaces.
 
-### `internal/claude/` — Claude Code headless runtime
+### `internal/claude/` -- Claude Code headless runtime
 
-**`session.go`** — `SessionRuntime` for `claude` provider (non-tmux, process-per-message).
+**`session.go`** -- `SessionRuntime` for `claude` provider (non-tmux, process-per-message).
 
-**`headless.go`** — Headless execution via `claude -p --resume <session_id>`.
+**`headless.go`** -- Headless execution via `claude -p --resume <session_id>`.
 
-**`hooks.go`** — Writes Claude Code hooks config to `workspace/.claude/settings.local.json`. Logged events: SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop, PreCompact, TaskCompleted, and more. All events piped to `./goat log-hook` for timestamping and credential redaction.
+**`hooks.go`** -- Writes Claude Code hooks config to `workspace/.claude/settings.local.json`. Logged events: SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop, PreCompact, TaskCompleted, and more. All events piped to `./goat log-hook` for timestamping and credential redaction.
 
-### `internal/claudetui/` — Claude Code TUI runtime (tmux)
+### `internal/claudetui/` -- Claude Code TUI runtime (tmux)
 
-**`tmux_bridge.go`** — The main interactive session runtime:
+**`tmux_bridge.go`** -- The main interactive session runtime:
 
-- `TmuxBridge` struct — manages the persistent Claude Code process inside tmux
-- `SendUserPrompt()` — pastes pydict envelope into tmux pane
-- `EnsureSession()` — starts tmux session if not running
-- `IsSessionBusy()` — content-change detection (2s apart)
-- `WaitForAwaitingInput()` — polls for idle state (stable pane + `❯` prompt)
-- `GetContextEstimate()` — parses `/context` output
-- `GetHealth()` — classifies session state (healthy, recoverable, non-recoverable)
+- `TmuxBridge` struct -- manages the persistent Claude Code process inside tmux
+- `SendUserPrompt()` -- pastes pydict envelope into tmux pane
+- `EnsureSession()` -- starts tmux session if not running
+- `IsSessionBusy()` -- content-change detection (2s apart)
+- `WaitForAwaitingInput()` -- polls for idle state (stable pane + `❯` prompt)
+- `GetContextEstimate()` -- parses `/context` output
+- `GetHealth()` -- classifies session state (healthy, recoverable, non-recoverable)
 
-**`headless.go`** ��� Headless execution for TUI-based subagents.
+**`headless.go`**  Headless execution for TUI-based subagents.
 
-### `internal/codex/` and `internal/codextui/` — Codex runtimes
+### `internal/codex/` and `internal/codextui/` -- Codex runtimes
 
 Mirror the claude/claudetui structure for OpenAI Codex. `codex exec` for headless, tmux bridge for TUI.
 
-### `internal/cron/` — Cron runner
+### `internal/cron/` -- Cron runner
 
 **`runner.go`**:
 
-- `Runner` struct — holds store, workspace dir, headless runtime, notifier
-- `Run()` — called every minute; parses 5-field cron schedules in each job's timezone
+- `Runner` struct -- holds store, workspace dir, headless runtime, notifier
+- `Run()` -- called every minute; parses 5-field cron schedules in each job's timezone
 - Skips jobs whose previous run is still in-flight
 - Two job types: `subagent` (spawns headless agent with prompt) and `system` (runs shell command)
 - Logs all runs to `cron/runs.jsonl`
 
-### `internal/db/` — BoltDB persistence
+### `internal/db/` -- BoltDB persistence
 
-**`db.go`** — Open-per-operation pattern (no held connections):
+**`db.go`** -- Open-per-operation pattern (no held connections):
 
 **Buckets:**
 
@@ -200,7 +200,7 @@ Mirror the claude/claudetui structure for OpenAI Codex. `codex exec` for headles
 
 **Key operations:** `ActiveCrons()`, `SaveCron()`, `DeleteCron()`, `RunningSubagents()`, `RecordSubagentFinish()`, `AllChannels()`, `GetMeta()`, `SetMeta()`
 
-### `internal/slack/` — Slack connector
+### `internal/slack/` -- Slack connector
 
 **`connector.go`**:
 
@@ -209,74 +209,74 @@ Mirror the claude/claudetui structure for OpenAI Codex. `codex exec` for headles
 - Attachment support: downloads files to `workspace/tmp/slack/attachments/`
   - Allowed: PDF, CSV, XLSX, DOCX, PNG, JPG (25 MB max per file, 251 MB total)
   - Auto-sweep old files every 4 hours (30-day retention)
-- `SendMessage()` — delivers markdown converted to Slack mrkdwn
-- `SendMedia()` — uploads files with optional caption
+- `SendMessage()` -- delivers markdown converted to Slack mrkdwn
+- `SendMedia()` -- uploads files with optional caption
 
-**`thinking.go`** — Posts/deletes `_thinking..._` indicator messages with TTL reaper (4min soft / 20min hard).
+**`thinking.go`** -- Posts/deletes `_thinking..._` indicator messages with TTL reaper (4min soft / 20min hard).
 
-### `internal/telegram/` — Telegram connector
+### `internal/telegram/` -- Telegram connector
 
 **`connector.go`**:
 
 - Supports both polling and webhook modes
-- `SendMessage()` — delivers markdown converted to Telegram HTML
-- `SendMedia()` — uploads files/photos with caption
+- `SendMessage()` -- delivers markdown converted to Telegram HTML
+- `SendMedia()` -- uploads files/photos with caption
 - Attachment handling similar to Slack connector
 
-### `internal/subagent/` — Subagent lifecycle
+### `internal/subagent/` -- Subagent lifecycle
 
 **`run.go`**:
 
-- `BuildPreamble()` — loads GOATED.md, self/CLAUDE.md, self/AGENTS.md
-- `BuildPrompt()` — combines preamble + user prompt + cron context
-- `RunSync()` — synchronous headless execution
-- `RunBackground()` — detached process with guardian wrapper
-- `HandleCompletion()` — records status to DB, notifies main session via tmux paste
-- `NotifyMainSession()` — builds system notice envelope and pastes into main tmux session
+- `BuildPreamble()` -- loads GOATED.md, self/CLAUDE.md, self/AGENTS.md
+- `BuildPrompt()` -- combines preamble + user prompt + cron context
+- `RunSync()` -- synchronous headless execution
+- `RunBackground()` -- detached process with guardian wrapper
+- `HandleCompletion()` -- records status to DB, notifies main session via tmux paste
+- `NotifyMainSession()` -- builds system notice envelope and pastes into main tmux session
 - Extracts `GOATED_SENT_MESSAGE` markers from subagent logs for notification context
 
-### `internal/msglog/` — Message logging & redaction
+### `internal/msglog/` -- Message logging & redaction
 
-**`logger.go`** — Structured JSONL logging:
+**`logger.go`** -- Structured JSONL logging:
 
-- `logs/message_logs/daily/YYYY-MM-DD.jsonl` — all daily messages
-- `logs/message_logs/sessions/SESSION_ID.jsonl` — per-session conversation
-- Request ID correlation across user message → agent response
+- `logs/message_logs/daily/YYYY-MM-DD.jsonl` -- all daily messages
+- `logs/message_logs/sessions/SESSION_ID.jsonl` -- per-session conversation
+- Request ID correlation across user message -> agent response
 
-**`redact.go`** — Auto-redacts credential values from `workspace/creds/*.txt` in all logged output.
+**`redact.go`** -- Auto-redacts credential values from `workspace/creds/*.txt` in all logged output.
 
-**`replay.go`** — Detects stuck messages (sent_to_agent but never responded) and replays them on daemon restart.
+**`replay.go`** -- Detects stuck messages (sent_to_agent but never responded) and replays them on daemon restart.
 
-### `internal/tmux/` — Low-level tmux operations
+### `internal/tmux/` -- Low-level tmux operations
 
 **`tmux.go`**:
 
-- `PasteAndEnter()` / `PasteAndEnterFor()` — loads text to tmux buffer, pastes, polls for content change, sends Enter
-- `CapturePane()` / `CaptureVisible()` — full scrollback vs visible portion
-- `SessionExists()` / `SessionExistsFor()` — check for named sessions
+- `PasteAndEnter()` / `PasteAndEnterFor()` -- loads text to tmux buffer, pastes, polls for content change, sends Enter
+- `CapturePane()` / `CaptureVisible()` -- full scrollback vs visible portion
+- `SessionExists()` / `SessionExistsFor()` -- check for named sessions
 - Content-change detection for idle/busy state
 
-### `internal/pydict/` — Python dict encoding
+### `internal/pydict/` -- Python dict encoding
 
 **`encode.go`** / **`parse.go`**:
 
-- `Encode()` — map to Python dict literal (sorted keys)
-- `EncodeOrdered()` — preserves key order via `[]KV`
-- Handles: multiline strings (triple-quoted), nil→None, bool→True/False, nested maps/lists
+- `Encode()` -- map to Python dict literal (sorted keys)
+- `EncodeOrdered()` -- preserves key order via `[]KV`
+- Handles: multiline strings (triple-quoted), nil->None, bool->True/False, nested maps/lists
 - This is the wire format between goated and the agent runtime
 
-### `internal/runtime/` — Runtime factory
+### `internal/runtime/` -- Runtime factory
 
 **`factory.go`**:
 
-- `New(cfg)` — returns the correct `agent.Runtime` based on `cfg.AgentRuntime`
+- `New(cfg)` -- returns the correct `agent.Runtime` based on `cfg.AgentRuntime`
 - Four providers: `claude`, `claude_tui`, `codex`, `codex_tui`
 
-### `internal/app/` — Configuration
+### `internal/app/` -- Configuration
 
 **`config.go`**:
 
-- `LoadConfig()` — reads `goated.json` via Viper, overlays env vars and creds files
+- `LoadConfig()` -- reads `goated.json` via Viper, overlays env vars and creds files
 - `Config` struct covers: gateway, runtime, model, paths, Slack/Telegram settings, timezone, admin chat ID
 
 ---
@@ -296,7 +296,7 @@ Mirror the claude/claudetui structure for OpenAI Codex. `codex exec` for headles
 - Runner ticks every minute, checks due jobs against their timezone.
 - Two types: `subagent` (spawns headless agent) and `system` (runs shell command).
 - Won't fire again if previous run is still in-flight.
-- `notify_user` — sends result to user's chat. `notify_main_session` — pastes notice into main tmux session.
+- `notify_user` -- sends result to user's chat. `notify_main_session` -- pastes notice into main tmux session.
 - Bootstrap seeds two default crons: hourly heartbeat and knowledge extraction (every 8h).
 
 ## Configuration
@@ -340,14 +340,14 @@ Env vars always win over creds files. Use `goated creds set KEY VALUE` to manage
 
 ```
 logs/
-├── goat/                          # Daily CLI logs (YYYY-MM-DD.log)
-├── goated_daemon.log              # Daemon stdout/stderr
-├── message_logs/
-��   ├── daily/YYYY-MM-DD.jsonl     # All messages by date
-│   └── sessions/SESSION_ID.jsonl  # Per-session conversation
-├── cron/
-│   ├── runs.jsonl                 # Cron execution log
-│   └── jobs/TIMESTAMP-cron-ID.log # Per-job output
-└── subagent/
-    └── jobs/TIMESTAMP.log         # Per-subagent output
++---- goat/                          # Daily CLI logs (YYYY-MM-DD.log)
++---- goated_daemon.log              # Daemon stdout/stderr
++---- message_logs/
+   +---- daily/YYYY-MM-DD.jsonl     # All messages by date
+|   +---- sessions/SESSION_ID.jsonl  # Per-session conversation
++---- cron/
+|   +---- runs.jsonl                 # Cron execution log
+|   +---- jobs/TIMESTAMP-cron-ID.log # Per-job output
++---- subagent/
+    +---- jobs/TIMESTAMP.log         # Per-subagent output
 ```
