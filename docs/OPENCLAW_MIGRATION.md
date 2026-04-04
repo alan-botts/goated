@@ -30,11 +30,11 @@ cp -r /path/to/your/openclaw/workspace/* workspace/self/legacy_openclaw/
 # 5. Tell your agent to migrate itself
 ```
 
-Send this message to your agent via Slack or Telegram:
+Then just send the agent a link to this file and let it cook:
 
-> I'm migrating you from OpenClaw. All the old files are in `self/legacy_openclaw/`. Help me systematically migrate everything into your Goated world -- credentials, cron jobs, tools, memory, and any important context.
+> Read https://github.com/endgame-labs/goated/blob/main/docs/OPENCLAW_MIGRATION.md and follow the migration steps. All my old OpenClaw files are in `self/legacy_openclaw/`.
 
-The agent will walk through the old files, set up credentials via `./goat creds set`, register cron jobs, and organize your data into the `workspace/self/` structure. It knows what goes where.
+The agent will walk through the old files, set up credentials, register cron jobs, rebuild tools, organize knowledge into the vault, and get itself fully migrated. The detailed steps below are for reference -- the agent can follow them on its own.
 
 ## What's different
 
@@ -190,7 +190,36 @@ The agent understands the `workspace/self/` layout and will:
 - Set up tools under `self/tools/`
 - Migrate any prompt files into `self/prompts/`
 
-Once everything useful has been migrated, you can delete `self/legacy_openclaw/`.
+### 8. Migrate tools into the toolbox CLI
+
+Goated agents build custom tools as Go/Cobra subcommands in a single binary under `self/tools/` (see [TOOLS.md](../workspace/TOOLS.md) for the full guide). If your OpenClaw agent had scripts, API integrations, or custom capabilities, tell the agent to migrate them:
+
+> Look through `self/legacy_openclaw/` for any scripts, tools, or API integrations I was using. For each one, migrate it into a subcommand on the toolbox CLI under `self/tools/go/`. Build it in Go with Cobra, test it, and make sure it works. See `TOOLS.md` for the pattern.
+
+The agent will:
+- Identify scripts and tools from your old workspace
+- Rewrite them as Go/Cobra subcommands (single static binary, no runtime dependencies)
+- Register them under `self/tools/go/cmd/<toolname>/`
+- Build and test each one
+- Document them in `self/CLAUDE.md` so future sessions know they exist
+
+This is better than carrying over old shell scripts or Python tools -- you end up with a single `self/tools/<binary>` that has all your capabilities as subcommands with built-in `--help`.
+
+### 9. Migrate knowledge into the vault
+
+Your OpenClaw workspace likely had context files, notes, and accumulated knowledge scattered across bootstrap files and session history. Tell the agent to systematically extract and organize it:
+
+> Go through everything in `self/legacy_openclaw/` -- context files, notes, session logs, any accumulated knowledge. Extract the important information and organize it into proper vault entries under `self/VAULT/`. Use markdown files with YAML frontmatter and wikilinks between related entries. People go in `VAULT/people/`, projects in `VAULT/projects/`, companies in `VAULT/companies/`, and so on.
+
+The agent will:
+- Read through old context/bootstrap files for embedded knowledge
+- Create structured vault entries with proper frontmatter and cross-references
+- Build wikilinks between related entries (people to projects, companies to people, etc.)
+- Run `toolbox vault check-links` (if you've built it) to verify link integrity
+
+This is one of the biggest upgrades from OpenClaw. Instead of knowledge living as force-injected context files that burn tokens on every request, it lives as a searchable, interlinked vault that the agent reads on demand.
+
+Once everything useful has been migrated and tested, you can delete `self/legacy_openclaw/`.
 
 ## The workspace/self pattern
 
