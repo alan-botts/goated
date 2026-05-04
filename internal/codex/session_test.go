@@ -5,17 +5,17 @@ import (
 	"testing"
 )
 
-func TestSessionPromptArgsFreshReadsPromptFromStdin(t *testing.T) {
+func TestSessionPromptArgsFreshUsesPositionalPrompt(t *testing.T) {
 	r := NewSessionRuntime("/tmp/workspace", "/tmp/logs")
 
-	got := r.promptArgs("")
+	got := r.promptArgs("", "hello")
 	want := []string{
 		"exec",
 		"--json",
 		"--sandbox", "danger-full-access",
 		"--dangerously-bypass-approvals-and-sandbox",
 		"-c", `model_instructions_file="GOATED.md"`,
-		"-",
+		"hello",
 	}
 
 	if !reflect.DeepEqual(got, want) {
@@ -23,17 +23,16 @@ func TestSessionPromptArgsFreshReadsPromptFromStdin(t *testing.T) {
 	}
 }
 
-func TestSessionPromptArgsResumeReadsPromptFromStdin(t *testing.T) {
+func TestSessionPromptArgsResumeUsesPositionalPromptAfterThreadID(t *testing.T) {
 	r := NewSessionRuntime("/tmp/workspace", "/tmp/logs")
 
-	got := r.promptArgs("thread-123")
+	got := r.promptArgs("thread-123", "hello")
 	want := []string{
 		"exec", "resume",
 		"--json",
-		"--sandbox", "danger-full-access",
 		"--dangerously-bypass-approvals-and-sandbox",
 		"-c", `model_instructions_file="GOATED.md"`,
-		"thread-123", "-",
+		"thread-123", "hello",
 	}
 
 	if !reflect.DeepEqual(got, want) {

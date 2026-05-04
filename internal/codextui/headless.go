@@ -21,7 +21,6 @@ func headlessArgs() []string {
 		"--sandbox", "danger-full-access",
 		"--dangerously-bypass-approvals-and-sandbox",
 		"-c", `model_instructions_file="GOATED.md"`,
-		"-",
 	}
 }
 
@@ -39,10 +38,9 @@ func (h *HeadlessRuntime) RunSync(ctx context.Context, store *db.Store, req agen
 	cmd := exec.CommandContext(
 		ctx,
 		"codex",
-		headlessArgs()...,
+		append(headlessArgs(), req.Prompt)...,
 	)
 	cmd.Dir = workspaceDir
-	cmd.Stdin = strings.NewReader(req.Prompt)
 
 	result, err := subagent.RunSyncCommand(ctx, store, cmd, subagent.RunOpts{
 		WorkspaceDir:      cmd.Dir,

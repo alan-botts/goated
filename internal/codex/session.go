@@ -75,7 +75,7 @@ func (r *SessionRuntime) writeThreadID(id string) error {
 	return os.WriteFile(r.threadIDPath(), []byte(id+"\n"), 0o644)
 }
 
-func (r *SessionRuntime) execArgs() []string {
+func (r *SessionRuntime) freshExecArgs() []string {
 	return []string{
 		"--json",
 		"--sandbox", "danger-full-access",
@@ -84,13 +84,18 @@ func (r *SessionRuntime) execArgs() []string {
 	}
 }
 
-func (r *SessionRuntime) promptArgs(threadID string) []string {
+func (r *SessionRuntime) promptArgs(threadID string, prompt string) []string {
 	if threadID != "" {
-		args := append([]string{"exec", "resume"}, r.execArgs()...)
-		return append(args, threadID, "-")
+		args := []string{
+			"exec", "resume",
+			"--json",
+			"--dangerously-bypass-approvals-and-sandbox",
+			"-c", `model_instructions_file="GOATED.md"`,
+		}
+		return append(args, threadID, prompt)
 	}
-	args := append([]string{"exec"}, r.execArgs()...)
-	return append(args, "-")
+	args := append([]string{"exec"}, r.freshExecArgs()...)
+	return append(args, prompt)
 }
 
 func (r *SessionRuntime) EnsureSession(ctx context.Context) error {
@@ -134,10 +139,9 @@ func (r *SessionRuntime) sendPrompt(ctx context.Context, prompt string, forceFre
 		threadID = r.readThreadID()
 	}
 
-	cmd := exec.CommandContext(ctx, "codex", r.promptArgs(threadID)...)
+	cmd := exec.CommandContext(ctx, "codex", r.promptArgs(threadID, prompt)...)
 
 	cmd.Dir = r.workspaceDir
-	cmd.Stdin = strings.NewReader(prompt)
 	if reqID := msglog.RequestIDFromContext(ctx); reqID != "" {
 		cmd.Env = append(filterEnv(os.Environ(), "GOAT_REQUEST_ID"), "GOAT_REQUEST_ID="+reqID)
 	}
