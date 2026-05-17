@@ -287,15 +287,26 @@ func (r *SessionRuntime) sendEnvelope(ctx context.Context, envelope string) erro
 		runErr := cmd.Wait()
 		outFile.Close()
 
+		stderr := stderrBuf.String()
+
 		// Parse session_id from JSON output and save for future --resume
 		if sid := parseSessionID(stdoutBuf.String()); sid != "" {
 			_ = r.writeSessionID(sid)
 		}
 
+		// If the session's stored previous_message_id is corrupt (happens when
+		// a prior run was interrupted before an assistant response was written),
+		// drop the session so the next retry creates a fresh one without --resume.
+		if strings.Contains(stderr, "diagnostics.previous_message_id") {
+			fmt.Fprintf(os.Stderr, "[%s] bad previous_message_id — clearing session for fresh start\n",
+				time.Now().Format(time.RFC3339))
+			_ = os.Remove(r.sessionIDPath())
+		}
+
 		r.mu.Lock()
 		r.proc = nil
 		r.procErr = runErr
-		r.lastStderr = stderrBuf.String()
+		r.lastStderr = stderr
 		r.mu.Unlock()
 
 		close(done)
@@ -498,6 +509,7 @@ func (r *SessionRuntime) DetectRetryableError(ctx context.Context) string {
 		"overloaded_error",
 		"overloaded",
 		"status 500",
+		"diagnostics.previous_message_id",
 	} {
 		if strings.Contains(lastStderr, pat) {
 			return pat
