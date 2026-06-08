@@ -37,6 +37,21 @@ type restartRecord struct {
 
 const maxReplayAge = 1 * time.Hour
 
+// daemonSendTimeout bounds a single outbound send (the gateway API call) inside
+// the socket handler. Without it, an unreachable gateway API (e.g. Telegram TLS
+// timeouts) blocks the handler goroutine forever, which hangs the goat
+// send_user_message client waiting on a response, which in turn hangs the
+// runtime process that spawned it — wedging all message processing. The client
+// sets a longer deadline (see send_user_message.go / send_user_file.go) so the
+// daemon's own timeout fires first and returns a proper error.
+const daemonSendTimeout = 45 * time.Second
+
+// socketRoundTripTimeout is the client-side deadline for a goat send_user_message
+// / send_user_file round-trip to the daemon. It sits above daemonSendTimeout and
+// the Telegram transport timeout so the daemon's own error response wins under
+// normal slowness, while still guaranteeing the client can never block forever.
+const socketRoundTripTimeout = 90 * time.Second
+
 const (
 	subagentDrainTimeout     = 90 * time.Second
 	daemonStopTimeout        = 90 * time.Second
@@ -448,32 +463,37 @@ func handleDaemonSocketConn(ctx context.Context, conn net.Conn, responder gatewa
 		}, msglog.StatusPending, "")
 	}
 
+	// Bound the actual send so an unreachable gateway API can't wedge this
+	// handler (and the client/runtime blocked on it) indefinitely.
+	sendCtx, cancelSend := context.WithTimeout(ctx, daemonSendTimeout)
+	defer cancelSend()
+
 	var sendErr error
 	if req.FilePath != "" {
 		mediaResponder, ok := responder.(gateway.MediaResponder)
 		if !ok {
 			sendErr = fmt.Errorf("gateway %s does not support outbound media yet", gatewayName)
 		} else {
-			sendErr = mediaResponder.SendMedia(ctx, req.ChatID, req.FilePath, req.Caption, req.MediaType)
+			sendErr = mediaResponder.SendMedia(sendCtx, req.ChatID, req.FilePath, req.Caption, req.MediaType)
 		}
 	} else if len(req.BlocksJSON) > 0 {
 		blockResponder, ok := responder.(gateway.BlockResponder)
 		if !ok {
 			sendErr = fmt.Errorf("gateway %s does not support block messages", gatewayName)
 		} else if req.ThreadTS != "" {
-			sendErr = blockResponder.SendThreadBlockMessage(ctx, req.ChatID, req.ThreadTS, req.Text, req.BlocksJSON)
+			sendErr = blockResponder.SendThreadBlockMessage(sendCtx, req.ChatID, req.ThreadTS, req.Text, req.BlocksJSON)
 		} else {
-			sendErr = blockResponder.SendBlockMessage(ctx, req.ChatID, req.Text, req.BlocksJSON)
+			sendErr = blockResponder.SendBlockMessage(sendCtx, req.ChatID, req.Text, req.BlocksJSON)
 		}
 	} else if req.ThreadTS != "" {
 		threadedResponder, ok := responder.(gateway.ThreadedResponder)
 		if !ok {
 			sendErr = fmt.Errorf("gateway %s does not support threaded messages", gatewayName)
 		} else {
-			sendErr = threadedResponder.SendThreadMessage(ctx, req.ChatID, req.ThreadTS, req.Text)
+			sendErr = threadedResponder.SendThreadMessage(sendCtx, req.ChatID, req.ThreadTS, req.Text)
 		}
 	} else {
-		sendErr = responder.SendMessage(ctx, req.ChatID, req.Text)
+		sendErr = responder.SendMessage(sendCtx, req.ChatID, req.Text)
 	}
 	if sendErr != nil {
 		if logger != nil {
@@ -687,6 +707,23 @@ var daemonStatusCmd = &cobra.Command{
 		pidPath := filepath.Join(cfg.LogDir, "goated_daemon.pid")
 		restartLog := filepath.Join(cfg.LogDir, "restarts.jsonl")
 
+		// --probe: machine-readable readiness check for the watchdog. Exits
+		// non-zero if the daemon is down OR alive-but-unresponsive (wedged
+		// socket), which a plain PID liveness check can't distinguish.
+		if probe, _ := cmd.Flags().GetBool("probe"); probe {
+			pid, running := readPID(pidPath)
+			if !running {
+				fmt.Println("unhealthy: daemon not running")
+				return fmt.Errorf("daemon not running")
+			}
+			if err := probeDaemonSocket(cfg.LogDir, 10*time.Second); err != nil {
+				fmt.Printf("unhealthy: daemon pid=%d alive but socket unresponsive: %v\n", pid, err)
+				return fmt.Errorf("daemon socket unresponsive: %w", err)
+			}
+			fmt.Printf("healthy: daemon pid=%d responsive\n", pid)
+			return nil
+		}
+
 		// Check if running
 		if pid, running := readPID(pidPath); running {
 			fmt.Printf("Daemon running (pid=%d)\n", pid)
@@ -717,6 +754,30 @@ var daemonStatusCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+// probeDaemonSocket performs a bounded round-trip against the daemon's Unix
+// socket and returns nil if it answered in time. It sends an intentionally-empty
+// request, which the handler rejects immediately ("chat_id is required") without
+// touching the gateway API — so it proves the socket is accepting connections and
+// handler goroutines run to completion, a real readiness signal beyond "the PID
+// is alive". The watchdog uses this to detect a live-but-wedged daemon.
+func probeDaemonSocket(logDir string, timeout time.Duration) error {
+	socketPath := filepath.Join(logDir, "goated.sock")
+	conn, err := net.DialTimeout("unix", socketPath, timeout)
+	if err != nil {
+		return fmt.Errorf("dial socket: %w", err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(timeout))
+	if err := json.NewEncoder(conn).Encode(daemonSendRequest{}); err != nil {
+		return fmt.Errorf("write probe: %w", err)
+	}
+	var resp daemonSendResponse
+	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+		return fmt.Errorf("read response: %w", err)
+	}
+	return nil
 }
 
 // readExistingPID returns the PID of a running daemon, or 0 if none.
@@ -986,6 +1047,7 @@ func runReRedact(ctx context.Context, logDir, workspaceDir, timezone string) {
 
 func init() {
 	daemonRestartCmd.Flags().String("reason", "", "reason for restarting (required)")
+	daemonStatusCmd.Flags().Bool("probe", false, "probe the daemon socket; exit non-zero if down or unresponsive")
 	daemonCmd.AddCommand(daemonRunCmd)
 	daemonCmd.AddCommand(daemonRestartCmd)
 	daemonCmd.AddCommand(daemonStopCmd)

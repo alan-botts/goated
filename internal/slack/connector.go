@@ -458,7 +458,7 @@ func (c *Connector) reactionToMessage(ev *slackevents.ReactionAddedEvent, outerE
 
 // SendMessage sends a message to the specified Slack channel, converting
 // markdown to Slack's mrkdwn format. Clears any active thinking indicator first.
-func (c *Connector) SendMessage(_ context.Context, channelID, text string) error {
+func (c *Connector) SendMessage(ctx context.Context, channelID, text string) error {
 	c.clearThinkingIfNeeded(channelID)
 
 	mrkdwn := util.MarkdownToSlackMrkdwn(text)
@@ -466,7 +466,7 @@ func (c *Connector) SendMessage(_ context.Context, channelID, text string) error
 	// Slack has a 4000-char limit per message; split if needed
 	chunks := splitMessage(mrkdwn, 4000)
 	for _, chunk := range chunks {
-		_, _, err := c.api.PostMessage(channelID,
+		_, _, err := c.api.PostMessageContext(ctx, channelID,
 			slack.MsgOptionText(chunk, false),
 			slack.MsgOptionDisableLinkUnfurl(),
 		)
@@ -479,14 +479,14 @@ func (c *Connector) SendMessage(_ context.Context, channelID, text string) error
 }
 
 // SendThreadMessage sends a message as a reply to a specific thread.
-func (c *Connector) SendThreadMessage(_ context.Context, channelID, threadTS, text string) error {
+func (c *Connector) SendThreadMessage(ctx context.Context, channelID, threadTS, text string) error {
 	c.clearThinkingIfNeeded(channelID)
 
 	mrkdwn := util.MarkdownToSlackMrkdwn(text)
 
 	chunks := splitMessage(mrkdwn, 4000)
 	for _, chunk := range chunks {
-		_, _, err := c.api.PostMessage(channelID,
+		_, _, err := c.api.PostMessageContext(ctx, channelID,
 			slack.MsgOptionText(chunk, false),
 			slack.MsgOptionDisableLinkUnfurl(),
 			slack.MsgOptionTS(threadTS),
