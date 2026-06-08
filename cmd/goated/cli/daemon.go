@@ -264,6 +264,7 @@ var daemonRunCmd = &cobra.Command{
 				return fmt.Errorf("init telegram: %w", err)
 			}
 			conn.SetRespondAll(cfg.TelegramGroupRespondAll)
+			conn.SetAdminChatID(cfg.AdminChatID)
 			responder = conn
 
 			runner := &cronpkg.Runner{
