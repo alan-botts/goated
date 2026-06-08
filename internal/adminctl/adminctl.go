@@ -9,20 +9,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
 )
 
-// helperProcessPattern matches the per-message goat helper processes that hang
-// when the daemon's send path wedges (see the send-path timeout fix). It's an
-// extended regex understood by pgrep on both macOS and Linux.
-const helperProcessPattern = `goat send_user_(message|file)`
-
 const helpText = "*Admin commands* (owner only)\n" +
-	"`/admin status` — daemon pid, host, stuck-helper count\n" +
-	"`/admin reap` — kill stuck send_user_message/file helpers\n" +
+	"`/admin status` — daemon pid, host, time\n" +
 	"`/admin restart` — restart the daemon\n" +
 	"`/admin help` — this message"
 
@@ -56,9 +49,6 @@ func Execute(sub string) Result {
 		return Result{Reply: helpText}
 	case "status":
 		return Result{Reply: statusText()}
-	case "reap":
-		n := reapHelpers()
-		return Result{Reply: fmt.Sprintf("Reaped %d stuck helper process(es).", n)}
 	case "restart":
 		return Result{
 			Reply: "🔄 Restarting daemon… back in a moment.",
@@ -72,42 +62,9 @@ func Execute(sub string) Result {
 func statusText() string {
 	host, _ := os.Hostname()
 	return fmt.Sprintf(
-		"✅ Daemon alive and responsive\npid: %d\nhost: %s\nstuck helpers: %d\ntime: %s",
-		os.Getpid(), host, countHelpers(), time.Now().Format(time.RFC3339),
+		"✅ Daemon alive and responsive\npid: %d\nhost: %s\ntime: %s",
+		os.Getpid(), host, time.Now().Format(time.RFC3339),
 	)
-}
-
-// helperPIDs returns the PIDs of running goat send_user_message/file helpers,
-// excluding this process. pgrep is present on macOS and Linux.
-func helperPIDs() []int {
-	out, err := exec.Command("pgrep", "-f", helperProcessPattern).Output()
-	if err != nil {
-		return nil // non-zero exit means no matches
-	}
-	self := os.Getpid()
-	var pids []int
-	for _, field := range strings.Fields(string(out)) {
-		pid, err := strconv.Atoi(field)
-		if err != nil || pid == self {
-			continue
-		}
-		pids = append(pids, pid)
-	}
-	return pids
-}
-
-func countHelpers() int { return len(helperPIDs()) }
-
-// reapHelpers SIGKILLs every stuck helper and returns how many were signalled.
-// The owner invoked this explicitly, so it kills all of them regardless of age.
-func reapHelpers() int {
-	n := 0
-	for _, pid := range helperPIDs() {
-		if err := syscall.Kill(pid, syscall.SIGKILL); err == nil {
-			n++
-		}
-	}
-	return n
 }
 
 // restartDaemon launches a detached "goated daemon restart". It survives the

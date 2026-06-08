@@ -10,11 +10,11 @@ func TestParse(t *testing.T) {
 	}{
 		{"/admin restart", "restart", true},
 		{"  /admin   status  ", "status", true},
-		{"/admin RESTART", "restart", true}, // case-folded
-		{"/admin", "help", true},            // bare -> help
-		{"/admin reap extra args", "reap", true},
-		{"hello /admin restart", "", false}, // not a prefix
-		{"/administrate", "", false},        // not the /admin token
+		{"/admin RESTART", "restart", true},          // case-folded
+		{"/admin", "help", true},                     // bare -> help
+		{"/admin status extra args", "status", true}, // extra args ignored
+		{"hello /admin restart", "", false},          // not a prefix
+		{"/administrate", "", false},                 // not the /admin token
 		{"restart", "", false},
 		{"", "", false},
 	}
