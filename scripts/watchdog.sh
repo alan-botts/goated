@@ -3,6 +3,11 @@
 # Add to crontab:  */2 * * * * /path/to/goated/scripts/watchdog.sh
 set -euo pipefail
 
+# Cron uses a minimal PATH on macOS and may not see Homebrew-installed
+# runtimes such as codex. Include the standard Homebrew locations while
+# preserving any PATH supplied by the caller.
+export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH:-/usr/bin:/bin:/usr/sbin:/sbin}"
+
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PID_FILE="$REPO_DIR/logs/goated_daemon.pid"
 GOATED_BIN="$REPO_DIR/goated"
