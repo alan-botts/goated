@@ -334,6 +334,13 @@ func (b *TmuxBridge) GetSessionState(ctx context.Context) (agent.SessionState, e
 		}, nil
 	}
 
+	return b.classifySessionState(snap1, snap2), nil
+}
+
+// classifySessionState turns two pane snapshots taken 2s apart into a
+// session state. Split from GetSessionState so the classification — in
+// particular the auth gate — is testable without a live tmux server.
+func (b *TmuxBridge) classifySessionState(snap1, snap2 string) agent.SessionState {
 	tail := lastLines(snap2, 20)
 	switch {
 	// Auth-error text in the pane may be stale transcript output from a
@@ -346,22 +353,22 @@ func (b *TmuxBridge) GetSessionState(ctx context.Context) (agent.SessionState, e
 		return agent.SessionState{
 			Kind:    agent.SessionStateBlockedAuth,
 			Summary: "Claude Code login expired; run /login in the server session",
-		}, nil
+		}
 	case snap1 == snap2 && tmux.HasPrompt(snap2):
 		return agent.SessionState{
 			Kind:    agent.SessionStateAwaitingInput,
 			Summary: "idle at prompt",
-		}, nil
+		}
 	case snap1 == snap2:
 		return agent.SessionState{
 			Kind:    agent.SessionStateUnknownStable,
 			Summary: "pane is stable without a prompt",
-		}, nil
+		}
 	default:
 		return agent.SessionState{
 			Kind:    agent.SessionStateGenerating,
 			Summary: "processing",
-		}, nil
+		}
 	}
 }
 
@@ -397,9 +404,16 @@ func (b *TmuxBridge) GetHealth(ctx context.Context) (agent.HealthStatus, error) 
 		}, nil
 	}
 
+	return b.healthFromSnapshot(ctx, snap), nil
+}
+
+// healthFromSnapshot classifies a captured pane. Split from GetHealth so the
+// full wiring — pane tail, on-disk credentials lookup, and lazy auth probe —
+// is testable without a live tmux server.
+func (b *TmuxBridge) healthFromSnapshot(ctx context.Context, snap string) agent.HealthStatus {
 	return healthFromPaneTail(lastLines(snap, 20), oauthCredentialsState(time.Now()), func() authProbeResult {
 		return b.verifiedAuthState(ctx)
-	}), nil
+	})
 }
 
 // authErrorPatterns are pane strings indicating the Claude session hit an

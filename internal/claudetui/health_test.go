@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"goated/internal/agent"
 )
 
 // paneWithStaleAuthError reproduces a real incident: the transcript still
@@ -238,4 +240,149 @@ func TestVerifiedAuthStateCachesVerdicts(t *testing.T) {
 // expiresAt format Claude Code writes.
 func msString(ts time.Time) string {
 	return strconv.FormatInt(ts.UnixMilli(), 10)
+}
+
+// credsDir writes a credentials file expiring at the given time into a fresh
+// config dir and returns the dir, for use with t.Setenv(CLAUDE_CONFIG_DIR).
+func credsDir(t *testing.T, expiresAt time.Time) string {
+	t.Helper()
+	dir := t.TempDir()
+	content := `{"claudeAiOauth": {"expiresAt": ` + msString(expiresAt) + `}}`
+	if err := os.WriteFile(filepath.Join(dir, ".credentials.json"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func probeNever(t *testing.T) func(context.Context, string) authProbeResult {
+	return func(context.Context, string) authProbeResult {
+		t.Error("auth probe must not run for this case")
+		return authProbeInconclusive
+	}
+}
+
+// TestHealthFromSnapshotWiring pins that GetHealth's classification really
+// consults the on-disk credentials and the probe — a mutation that hardcodes
+// the credentials state (reintroducing the crash-loop incident) must fail
+// here, not just in the pure-function tests.
+func TestHealthFromSnapshotWiring(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("stale auth text with valid on-disk creds and passing probe is healthy", func(t *testing.T) {
+		t.Setenv("CLAUDE_CONFIG_DIR", credsDir(t, time.Now().Add(time.Hour)))
+		b := &TmuxBridge{
+			WorkspaceDir: t.TempDir(),
+			authProbe:    func(context.Context, string) authProbeResult { return authProbeOK },
+		}
+		got := b.healthFromSnapshot(ctx, paneWithStaleAuthError)
+		if !got.OK {
+			t.Errorf("healthFromSnapshot() = {OK:false Summary:%q}, want OK:true", got.Summary)
+		}
+	})
+
+	t.Run("stale auth text with expired on-disk creds is non-recoverable without probing", func(t *testing.T) {
+		t.Setenv("CLAUDE_CONFIG_DIR", credsDir(t, time.Now().Add(-time.Hour)))
+		b := &TmuxBridge{WorkspaceDir: t.TempDir(), authProbe: probeNever(t)}
+		got := b.healthFromSnapshot(ctx, paneWithStaleAuthError)
+		if got.OK || got.Recoverable {
+			t.Errorf("healthFromSnapshot() = {OK:%v Recoverable:%v}, want non-recoverable failure", got.OK, got.Recoverable)
+		}
+	})
+
+	t.Run("stale auth text with no creds file is non-recoverable without probing", func(t *testing.T) {
+		t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+		b := &TmuxBridge{WorkspaceDir: t.TempDir(), authProbe: probeNever(t)}
+		got := b.healthFromSnapshot(ctx, paneWithStaleAuthError)
+		if got.OK || got.Recoverable {
+			t.Errorf("healthFromSnapshot() = {OK:%v Recoverable:%v}, want non-recoverable failure", got.OK, got.Recoverable)
+		}
+	})
+
+	t.Run("clean pane is healthy regardless of creds", func(t *testing.T) {
+		t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+		b := &TmuxBridge{WorkspaceDir: t.TempDir(), authProbe: probeNever(t)}
+		if got := b.healthFromSnapshot(ctx, "● Done.\n\n╭───╮\n│ ❯ │\n╰───╯"); !got.OK {
+			t.Errorf("healthFromSnapshot() = {OK:false Summary:%q}, want OK:true", got.Summary)
+		}
+	})
+}
+
+// TestClassifySessionState pins the GetSessionState half of the fix: the
+// BlockedAuth gate must consult both the on-disk credentials and the cached
+// probe verdict, and the newly unified "API Error: 401" pattern must match.
+func TestClassifySessionState(t *testing.T) {
+	seedProbeOK := func(t *testing.T, b *TmuxBridge) {
+		t.Helper()
+		b.authProbe = func(context.Context, string) authProbeResult { return authProbeOK }
+		if got := b.verifiedAuthState(context.Background()); got != authProbeOK {
+			t.Fatalf("seeding probe cache failed: %v", got)
+		}
+	}
+
+	t.Run("stale auth text with valid creds and verified probe awaits input", func(t *testing.T) {
+		t.Setenv("CLAUDE_CONFIG_DIR", credsDir(t, time.Now().Add(time.Hour)))
+		b := &TmuxBridge{WorkspaceDir: t.TempDir()}
+		seedProbeOK(t, b)
+		got := b.classifySessionState(paneWithStaleAuthError, paneWithStaleAuthError)
+		if got.Kind != agent.SessionStateAwaitingInput {
+			t.Errorf("Kind = %v, want AwaitingInput", got.Kind)
+		}
+	})
+
+	t.Run("auth text with valid creds but no cached verdict blocks on auth", func(t *testing.T) {
+		t.Setenv("CLAUDE_CONFIG_DIR", credsDir(t, time.Now().Add(time.Hour)))
+		b := &TmuxBridge{WorkspaceDir: t.TempDir()}
+		got := b.classifySessionState(paneWithStaleAuthError, paneWithStaleAuthError)
+		if got.Kind != agent.SessionStateBlockedAuth {
+			t.Errorf("Kind = %v, want BlockedAuth", got.Kind)
+		}
+	})
+
+	t.Run("auth text with expired creds blocks even with a cached verdict", func(t *testing.T) {
+		b := &TmuxBridge{WorkspaceDir: t.TempDir()}
+		seedProbeOK(t, b)
+		t.Setenv("CLAUDE_CONFIG_DIR", credsDir(t, time.Now().Add(-time.Hour)))
+		got := b.classifySessionState(paneWithStaleAuthError, paneWithStaleAuthError)
+		if got.Kind != agent.SessionStateBlockedAuth {
+			t.Errorf("Kind = %v, want BlockedAuth", got.Kind)
+		}
+	})
+
+	t.Run("bare API Error 401 text blocks on auth", func(t *testing.T) {
+		t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+		b := &TmuxBridge{WorkspaceDir: t.TempDir()}
+		pane := "● API Error: 401 request failed\n\n╭───╮\n│ ❯ │\n╰───╯"
+		got := b.classifySessionState(pane, pane)
+		if got.Kind != agent.SessionStateBlockedAuth {
+			t.Errorf("Kind = %v, want BlockedAuth", got.Kind)
+		}
+	})
+
+	t.Run("stable clean pane with prompt awaits input", func(t *testing.T) {
+		t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+		b := &TmuxBridge{WorkspaceDir: t.TempDir()}
+		pane := "● Done.\n\n╭───╮\n│ ❯ │\n╰───╯"
+		got := b.classifySessionState(pane, pane)
+		if got.Kind != agent.SessionStateAwaitingInput {
+			t.Errorf("Kind = %v, want AwaitingInput", got.Kind)
+		}
+	})
+
+	t.Run("changing pane is generating", func(t *testing.T) {
+		t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+		b := &TmuxBridge{WorkspaceDir: t.TempDir()}
+		got := b.classifySessionState("thinking...", "thinking....")
+		if got.Kind != agent.SessionStateGenerating {
+			t.Errorf("Kind = %v, want Generating", got.Kind)
+		}
+	})
+
+	t.Run("stable pane without prompt is unknown-stable", func(t *testing.T) {
+		t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+		b := &TmuxBridge{WorkspaceDir: t.TempDir()}
+		got := b.classifySessionState("some output", "some output")
+		if got.Kind != agent.SessionStateUnknownStable {
+			t.Errorf("Kind = %v, want UnknownStable", got.Kind)
+		}
+	})
 }
