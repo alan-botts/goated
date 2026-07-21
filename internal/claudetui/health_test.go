@@ -236,6 +236,90 @@ func TestVerifiedAuthStateCachesVerdicts(t *testing.T) {
 	}
 }
 
+// TestHealthProbePopulatesSharedCache pins the contract the dispatch path
+// depends on: GetHealth's probe (via healthFromSnapshot) must land in the
+// same cache GetSessionState reads. If it didn't, classifySessionState would
+// see no verdict and return BlockedAuth on every poll while stale auth text
+// is visible — false "login expired" messages mid-dispatch.
+func TestHealthProbePopulatesSharedCache(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", credsDir(t, time.Now().Add(time.Hour)))
+	b := &TmuxBridge{
+		WorkspaceDir: t.TempDir(),
+		authProbe:    func(context.Context, string) authProbeResult { return authProbeOK },
+	}
+	if got := b.healthFromSnapshot(context.Background(), paneWithStaleAuthError); !got.OK {
+		t.Fatalf("healthFromSnapshot() = {OK:false Summary:%q}, want OK:true", got.Summary)
+	}
+	if got := b.cachedAuthState(); got != authProbeOK {
+		t.Errorf("cachedAuthState() after healthFromSnapshot = %v, want authProbeOK", got)
+	}
+	if got := b.classifySessionState(paneWithStaleAuthError, paneWithStaleAuthError); got.Kind != agent.SessionStateAwaitingInput {
+		t.Errorf("classifySessionState() after verified GetHealth = %v, want AwaitingInput", got.Kind)
+	}
+}
+
+// TestRestartAndResetInvalidateProbeCache pins that both session-recycling
+// entry points drop the cached verdict — the bound on the revoked-token
+// trade-off window. The canceled context makes the tmux operations fail
+// fast without touching a real tmux server; invalidation must happen anyway.
+func TestRestartAndResetInvalidateProbeCache(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	recycles := map[string]func(*TmuxBridge){
+		"RestartSession":    func(b *TmuxBridge) { _ = b.RestartSession(ctx) },
+		"ResetConversation": func(b *TmuxBridge) { _, _ = b.ResetConversation(ctx, "") },
+	}
+	for name, recycle := range recycles {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			b := &TmuxBridge{
+				WorkspaceDir: dir,
+				LogDir:       dir,
+				SessionName:  "goated-test-does-not-exist",
+				authProbe:    func(context.Context, string) authProbeResult { return authProbeOK },
+			}
+			if got := b.verifiedAuthState(context.Background()); got != authProbeOK {
+				t.Fatalf("seeding probe cache failed: %v", got)
+			}
+			recycle(b)
+			if got := b.cachedAuthState(); got != authProbeInconclusive {
+				t.Errorf("cachedAuthState() after %s = %v, want authProbeInconclusive (cache must be invalidated)", name, got)
+			}
+		})
+	}
+}
+
+// TestCacheReadersDoNotBlockOnInFlightProbe pins that cachedAuthState and
+// invalidateAuthProbe stay responsive while a probe is running — a hung
+// probe must never wedge GetSessionState polling or session restarts.
+func TestCacheReadersDoNotBlockOnInFlightProbe(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{})
+	b := &TmuxBridge{
+		WorkspaceDir: t.TempDir(),
+		authProbe: func(context.Context, string) authProbeResult {
+			close(started)
+			<-release
+			return authProbeOK
+		},
+	}
+	go b.verifiedAuthState(context.Background())
+	<-started
+
+	done := make(chan struct{})
+	go func() {
+		b.cachedAuthState()
+		b.invalidateAuthProbe()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Error("cachedAuthState/invalidateAuthProbe blocked behind an in-flight probe")
+	}
+	close(release)
+}
+
 // msString renders a timestamp as epoch milliseconds, matching the
 // expiresAt format Claude Code writes.
 func msString(ts time.Time) string {

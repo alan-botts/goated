@@ -24,8 +24,10 @@ type TmuxBridge struct {
 	SessionName  string
 
 	// authProbe overrides the headless auth probe (tests); nil means
-	// runClaudeAuthProbe. Guarded state below caches its verdict.
+	// runClaudeAuthProbe. probeRunMu serializes probe execution; probeMu
+	// guards only the cached verdict and is never held across a probe.
 	authProbe    func(ctx context.Context, workspaceDir string) authProbeResult
+	probeRunMu   sync.Mutex
 	probeMu      sync.Mutex
 	probeVerdict authProbeResult
 	probeExpiry  time.Time
