@@ -428,11 +428,30 @@ func TestConfirmBlockedAuth(t *testing.T) {
 		}
 	})
 
+	t.Run("stands when probe is inconclusive — only a passing probe refutes", func(t *testing.T) {
+		t.Setenv("CLAUDE_CONFIG_DIR", credsDir(t, time.Now().Add(time.Hour)))
+		b := &TmuxBridge{
+			WorkspaceDir: t.TempDir(),
+			authProbe:    func(context.Context, string) authProbeResult { return authProbeInconclusive },
+		}
+		if !b.confirmBlockedAuth(ctx) {
+			t.Error("confirmBlockedAuth() = false, want confirmed (true): an inconclusive probe must not refute a genuine auth block")
+		}
+	})
+
 	t.Run("stands without probing when creds are expired", func(t *testing.T) {
 		t.Setenv("CLAUDE_CONFIG_DIR", credsDir(t, time.Now().Add(-time.Hour)))
 		b := &TmuxBridge{WorkspaceDir: t.TempDir(), authProbe: probeNever(t)}
 		if !b.confirmBlockedAuth(ctx) {
 			t.Error("confirmBlockedAuth() = false, want confirmed (true) for expired creds")
+		}
+	})
+
+	t.Run("stands without probing when creds are unknown", func(t *testing.T) {
+		t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+		b := &TmuxBridge{WorkspaceDir: t.TempDir(), authProbe: probeNever(t)}
+		if !b.confirmBlockedAuth(ctx) {
+			t.Error("confirmBlockedAuth() = false, want confirmed (true) for unknown creds")
 		}
 	})
 }
