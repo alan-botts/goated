@@ -27,15 +27,25 @@ const (
 	authProbeFailed
 )
 
-// positiveProbeTTL must comfortably exceed the gateway's longest
-// GetSessionState polling window (postSendTimeout, 5 min): if a verified-OK
-// verdict expired mid-dispatch while stale auth text was still on screen,
-// classifySessionState would flip to BlockedAuth in the middle of a healthy
-// long-running task and the user would get a false "login expired" message.
+// positiveProbeTTL bounds how long a passing probe is trusted without
+// re-verification (and therefore how long a token revoked right after a
+// passing probe could be masked).
 const positiveProbeTTL = 15 * time.Minute
 
 // negativeProbeTTL is short so a manual /login is noticed quickly.
 const negativeProbeTTL = time.Minute
+
+// probeRenewWindow guarantees that a dispatch admitted by GetHealth cannot
+// see its positive verdict expire mid-flight: if a verified-OK verdict
+// expired while stale auth text was still on screen, classifySessionState
+// would flip to BlockedAuth in the middle of a healthy long-running task
+// and the user would get a false "login expired" message. GetHealth's
+// probing path treats a positive verdict with less than this much life left
+// as a miss and re-probes, so any admitted dispatch starts with at least
+// this margin — above the gateway's 5-min post-send polling window plus
+// paste/context-estimate/session-respawn overheads. cachedAuthState (the
+// polling hot path) honors the verdict until actual expiry.
+const probeRenewWindow = 8 * time.Minute
 
 // runClaudeAuthProbe issues a minimal headless request, using the same
 // invocation conventions as internal/subagent (flags, workspace dir,
@@ -89,13 +99,13 @@ func envWithoutClaudeCode() []string {
 // and invalidateAuthProbe stay wait-free even while a probe is in flight.
 // Inconclusive results are never cached.
 func (b *TmuxBridge) verifiedAuthState(ctx context.Context) authProbeResult {
-	if res, ok := b.freshVerdict(); ok {
+	if res, ok := b.probingVerdict(); ok {
 		return res
 	}
 	b.probeRunMu.Lock()
 	defer b.probeRunMu.Unlock()
 	// Another caller may have completed a probe while we waited.
-	if res, ok := b.freshVerdict(); ok {
+	if res, ok := b.probingVerdict(); ok {
 		return res
 	}
 	probe := b.authProbe
@@ -106,18 +116,35 @@ func (b *TmuxBridge) verifiedAuthState(ctx context.Context) authProbeResult {
 	b.probeMu.Lock()
 	switch res {
 	case authProbeOK:
-		b.probeVerdict, b.probeExpiry = res, time.Now().Add(positiveProbeTTL)
+		b.probeVerdict, b.probeExpiry = res, b.now().Add(positiveProbeTTL)
 	case authProbeFailed:
-		b.probeVerdict, b.probeExpiry = res, time.Now().Add(negativeProbeTTL)
+		b.probeVerdict, b.probeExpiry = res, b.now().Add(negativeProbeTTL)
 	}
 	b.probeMu.Unlock()
 	return res
 }
 
+// probingVerdict is the cache check for the probing path: a positive verdict
+// about to expire within probeRenewWindow reads as a miss so it gets renewed
+// before a dispatch relies on it. Negative verdicts are honored to actual
+// expiry — their TTL is already short.
+func (b *TmuxBridge) probingVerdict() (authProbeResult, bool) {
+	b.probeMu.Lock()
+	defer b.probeMu.Unlock()
+	now := b.now()
+	if !now.Before(b.probeExpiry) {
+		return authProbeInconclusive, false
+	}
+	if b.probeVerdict == authProbeOK && !now.Add(probeRenewWindow).Before(b.probeExpiry) {
+		return authProbeInconclusive, false
+	}
+	return b.probeVerdict, true
+}
+
 func (b *TmuxBridge) freshVerdict() (authProbeResult, bool) {
 	b.probeMu.Lock()
 	defer b.probeMu.Unlock()
-	if time.Now().Before(b.probeExpiry) {
+	if b.now().Before(b.probeExpiry) {
 		return b.probeVerdict, true
 	}
 	return authProbeInconclusive, false

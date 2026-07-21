@@ -320,6 +320,82 @@ func TestCacheReadersDoNotBlockOnInFlightProbe(t *testing.T) {
 	close(release)
 }
 
+// TestProbeVerdictTTLSemantics pins the load-bearing timing rules with a
+// fake clock: the ~15-min positive TTL, the ~1-min negative TTL, and the
+// probing-path renewal that guarantees a dispatch admitted by GetHealth
+// cannot see its positive verdict expire inside the gateway's 5-min
+// post-send polling window.
+func TestProbeVerdictTTLSemantics(t *testing.T) {
+	base := time.Now()
+	current := base
+	calls := 0
+	verdict := authProbeOK
+	b := &TmuxBridge{
+		WorkspaceDir: t.TempDir(),
+		nowFn:        func() time.Time { return current },
+		authProbe: func(context.Context, string) authProbeResult {
+			calls++
+			return verdict
+		},
+	}
+	ctx := context.Background()
+
+	// t=0: probe runs, positive verdict cached until t+15m.
+	if got := b.verifiedAuthState(ctx); got != authProbeOK || calls != 1 {
+		t.Fatalf("initial probe: verdict=%v calls=%d", got, calls)
+	}
+
+	// t=6m: 9m of life left (>= renew window) — cache hit, no re-probe.
+	current = base.Add(6 * time.Minute)
+	if got := b.verifiedAuthState(ctx); got != authProbeOK || calls != 1 {
+		t.Errorf("t=6m: verdict=%v calls=%d, want cache hit with 1 call", got, calls)
+	}
+
+	// t=8m: under 8m of life left — the probing path must renew so a
+	// dispatch admitted now outlives the 5-min polling window.
+	current = base.Add(8 * time.Minute)
+	if got := b.verifiedAuthState(ctx); got != authProbeOK || calls != 2 {
+		t.Errorf("t=8m: verdict=%v calls=%d, want renewal probe (2 calls)", got, calls)
+	}
+	// Renewal reset expiry to t=8m+15m=23m. The hot path honors it to the end...
+	current = base.Add(22 * time.Minute)
+	if got := b.cachedAuthState(); got != authProbeOK {
+		t.Errorf("t=22m: cachedAuthState=%v, want authProbeOK (positive TTL is 15m from renewal)", got)
+	}
+	// ...and not a moment longer.
+	current = base.Add(23*time.Minute + time.Second)
+	if got := b.cachedAuthState(); got != authProbeInconclusive {
+		t.Errorf("t=23m+1s: cachedAuthState=%v, want expired", got)
+	}
+
+	// Negative verdicts: cached for ~1 minute, honored without renewal.
+	verdict = authProbeFailed
+	nb := &TmuxBridge{
+		WorkspaceDir: t.TempDir(),
+		nowFn:        func() time.Time { return current },
+		authProbe: func(context.Context, string) authProbeResult {
+			calls++
+			return verdict
+		},
+	}
+	negBase := current
+	if got := nb.verifiedAuthState(ctx); got != authProbeFailed {
+		t.Fatalf("negative probe: verdict=%v", got)
+	}
+	probesAfterNeg := calls
+	current = negBase.Add(30 * time.Second)
+	if got := nb.verifiedAuthState(ctx); got != authProbeFailed || calls != probesAfterNeg {
+		t.Errorf("t=+30s: verdict=%v calls=%d, want cached failure with no re-probe", got, calls)
+	}
+	if got := nb.cachedAuthState(); got != authProbeFailed {
+		t.Errorf("t=+30s: cachedAuthState=%v, want authProbeFailed", got)
+	}
+	current = negBase.Add(61 * time.Second)
+	if got := nb.cachedAuthState(); got != authProbeInconclusive {
+		t.Errorf("t=+61s: cachedAuthState=%v, want expired (negative TTL is ~1m)", got)
+	}
+}
+
 // msString renders a timestamp as epoch milliseconds, matching the
 // expiresAt format Claude Code writes.
 func msString(ts time.Time) string {

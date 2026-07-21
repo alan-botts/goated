@@ -26,11 +26,20 @@ type TmuxBridge struct {
 	// authProbe overrides the headless auth probe (tests); nil means
 	// runClaudeAuthProbe. probeRunMu serializes probe execution; probeMu
 	// guards only the cached verdict and is never held across a probe.
+	// nowFn overrides the clock for TTL tests; nil means time.Now.
 	authProbe    func(ctx context.Context, workspaceDir string) authProbeResult
+	nowFn        func() time.Time
 	probeRunMu   sync.Mutex
 	probeMu      sync.Mutex
 	probeVerdict authProbeResult
 	probeExpiry  time.Time
+}
+
+func (b *TmuxBridge) now() time.Time {
+	if b.nowFn != nil {
+		return b.nowFn()
+	}
+	return time.Now()
 }
 
 func NewSessionRuntime(workspaceDir, logDir string) *TmuxBridge {
