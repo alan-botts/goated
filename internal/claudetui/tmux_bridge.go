@@ -106,7 +106,19 @@ func (b *TmuxBridge) WaitForAwaitingInput(ctx context.Context, timeout time.Dura
 			return agent.SessionState{}, err
 		}
 		switch state.Kind {
-		case agent.SessionStateAwaitingInput, agent.SessionStateBlockedAuth, agent.SessionStateBlockedIntervene:
+		case agent.SessionStateBlockedAuth:
+			// A dispatch can poll here far longer than one probe-verdict
+			// TTL (the gateway chains retry windows after a single
+			// GetHealth), so an apparent auth block may just be the cached
+			// verdict expiring while stale auth text is on screen.
+			// Re-verify before surfacing it: a passing probe re-arms the
+			// cache and the next poll classifies normally.
+			if !b.confirmBlockedAuth(ctx) {
+				unknownStableSince = time.Time{}
+				break
+			}
+			return state, nil
+		case agent.SessionStateAwaitingInput, agent.SessionStateBlockedIntervene:
 			return state, nil
 		case agent.SessionStateUnknownStable:
 			if unknownStableSince.IsZero() {

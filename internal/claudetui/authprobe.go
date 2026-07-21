@@ -35,16 +35,17 @@ const positiveProbeTTL = 15 * time.Minute
 // negativeProbeTTL is short so a manual /login is noticed quickly.
 const negativeProbeTTL = time.Minute
 
-// probeRenewWindow guarantees that a dispatch admitted by GetHealth cannot
-// see its positive verdict expire mid-flight: if a verified-OK verdict
+// probeRenewWindow keeps the common case cheap: if a verified-OK verdict
 // expired while stale auth text was still on screen, classifySessionState
-// would flip to BlockedAuth in the middle of a healthy long-running task
-// and the user would get a false "login expired" message. GetHealth's
-// probing path treats a positive verdict with less than this much life left
-// as a miss and re-probes, so any admitted dispatch starts with at least
-// this margin — above the gateway's 5-min post-send polling window plus
-// paste/context-estimate/session-respawn overheads. cachedAuthState (the
-// polling hot path) honors the verdict until actual expiry.
+// would flip to BlockedAuth in the middle of a healthy long-running task.
+// GetHealth's probing path treats a positive verdict with less than this
+// much life left as a miss and re-probes, so a dispatch it admits starts
+// with at least this margin — above one 5-min gateway post-send polling
+// window plus paste/context-estimate/session-respawn overheads. Dispatches
+// that outlast even this (the gateway chains up to three polling windows on
+// retries) are covered by confirmBlockedAuth, which re-verifies an apparent
+// auth block at the point it would otherwise be surfaced. cachedAuthState
+// (the polling hot path) honors the verdict until actual expiry.
 const probeRenewWindow = 8 * time.Minute
 
 // runClaudeAuthProbe issues a minimal headless request, using the same
@@ -162,4 +163,17 @@ func (b *TmuxBridge) invalidateAuthProbe() {
 	b.probeMu.Lock()
 	b.probeExpiry = time.Time{}
 	b.probeMu.Unlock()
+}
+
+// confirmBlockedAuth re-checks an apparent auth block before it is surfaced
+// to callers that act on it (user-facing "login expired" messages, aborted
+// dispatches). It returns false when the block is refuted: the on-disk token
+// is unexpired and a probe (cached or fresh — this may block up to one probe
+// run) verifies credentials, in which case the pane text was stale and the
+// re-armed cache lets subsequent classification proceed normally.
+func (b *TmuxBridge) confirmBlockedAuth(ctx context.Context) bool {
+	if oauthCredentialsState(time.Now()) != credentialsValid {
+		return true
+	}
+	return b.verifiedAuthState(ctx) != authProbeOK
 }

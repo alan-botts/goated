@@ -396,6 +396,89 @@ func TestProbeVerdictTTLSemantics(t *testing.T) {
 	}
 }
 
+// TestConfirmBlockedAuth pins the last line of defense against false
+// "login expired" escalations: an apparent auth block must be re-verified
+// (probing if needed) before being surfaced, and must stand when the
+// credentials cannot refute it.
+func TestConfirmBlockedAuth(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("refuted when creds valid and probe passes", func(t *testing.T) {
+		t.Setenv("CLAUDE_CONFIG_DIR", credsDir(t, time.Now().Add(time.Hour)))
+		b := &TmuxBridge{
+			WorkspaceDir: t.TempDir(),
+			authProbe:    func(context.Context, string) authProbeResult { return authProbeOK },
+		}
+		if b.confirmBlockedAuth(ctx) {
+			t.Error("confirmBlockedAuth() = true, want refuted (false)")
+		}
+		if got := b.cachedAuthState(); got != authProbeOK {
+			t.Errorf("cachedAuthState() after refutation = %v, want authProbeOK (cache must be re-armed)", got)
+		}
+	})
+
+	t.Run("stands when probe fails despite valid-looking creds", func(t *testing.T) {
+		t.Setenv("CLAUDE_CONFIG_DIR", credsDir(t, time.Now().Add(time.Hour)))
+		b := &TmuxBridge{
+			WorkspaceDir: t.TempDir(),
+			authProbe:    func(context.Context, string) authProbeResult { return authProbeFailed },
+		}
+		if !b.confirmBlockedAuth(ctx) {
+			t.Error("confirmBlockedAuth() = false, want confirmed (true) for revoked token")
+		}
+	})
+
+	t.Run("stands without probing when creds are expired", func(t *testing.T) {
+		t.Setenv("CLAUDE_CONFIG_DIR", credsDir(t, time.Now().Add(-time.Hour)))
+		b := &TmuxBridge{WorkspaceDir: t.TempDir(), authProbe: probeNever(t)}
+		if !b.confirmBlockedAuth(ctx) {
+			t.Error("confirmBlockedAuth() = false, want confirmed (true) for expired creds")
+		}
+	})
+}
+
+// TestMidDispatchVerdictExpiryRecovers replays round-4's chained-retry
+// scenario end to end at the bridge layer: a verdict expires mid-poll while
+// stale auth text is on screen, classification flips to BlockedAuth, and the
+// confirmBlockedAuth re-verification path re-arms the cache so the next poll
+// classifies normally instead of surfacing a false "login expired".
+func TestMidDispatchVerdictExpiryRecovers(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", credsDir(t, time.Now().Add(24*time.Hour)))
+	base := time.Now()
+	current := base
+	calls := 0
+	b := &TmuxBridge{
+		WorkspaceDir: t.TempDir(),
+		nowFn:        func() time.Time { return current },
+		authProbe: func(context.Context, string) authProbeResult {
+			calls++
+			return authProbeOK
+		},
+	}
+	ctx := context.Background()
+
+	// Dispatch admitted at t=0 with a fresh verdict.
+	if got := b.healthFromSnapshot(ctx, paneWithStaleAuthError); !got.OK {
+		t.Fatalf("admission: %+v", got)
+	}
+	// t=16m: mid-poll on a retried dispatch, past the 15m TTL.
+	current = base.Add(16 * time.Minute)
+	if got := b.classifySessionState(paneWithStaleAuthError, paneWithStaleAuthError); got.Kind != agent.SessionStateBlockedAuth {
+		t.Fatalf("expired verdict should classify BlockedAuth first, got %v", got.Kind)
+	}
+	// WaitForAwaitingInput's re-verification refutes the block...
+	if b.confirmBlockedAuth(ctx) {
+		t.Fatal("confirmBlockedAuth() = true, want refuted on healthy credentials")
+	}
+	if calls != 2 {
+		t.Errorf("probe calls = %d, want 2 (admission + one re-verification)", calls)
+	}
+	// ...and the very next poll classifies normally off the re-armed cache.
+	if got := b.classifySessionState(paneWithStaleAuthError, paneWithStaleAuthError); got.Kind != agent.SessionStateAwaitingInput {
+		t.Errorf("post-refutation classification = %v, want AwaitingInput", got.Kind)
+	}
+}
+
 // msString renders a timestamp as epoch milliseconds, matching the
 // expiresAt format Claude Code writes.
 func msString(ts time.Time) string {
