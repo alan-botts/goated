@@ -327,9 +327,7 @@ func (b *TmuxBridge) GetSessionState(ctx context.Context) (agent.SessionState, e
 
 	tail := lastLines(snap2, 20)
 	switch {
-	case strings.Contains(tail, "Please run /login"),
-		strings.Contains(tail, "OAuth token has expired"),
-		strings.Contains(tail, "authentication_error"):
+	case matchPattern(tail, authErrorPatterns) != "" && oauthCredentialsState(time.Now()) != credentialsValid:
 		return agent.SessionState{
 			Kind:    agent.SessionStateBlockedAuth,
 			Summary: "Claude Code login expired; run /login in the server session",
@@ -384,39 +382,72 @@ func (b *TmuxBridge) GetHealth(ctx context.Context) (agent.HealthStatus, error) 
 		}, nil
 	}
 
-	tail := lastLines(snap, 20)
-	errorPatterns := []string{
-		"API Error: 401",
-		"authentication_error",
-		"OAuth token has expired",
-		"Please run /login",
-		"API Error: 403",
-		"overloaded_error",
-		"Could not connect",
-	}
-	for _, pat := range errorPatterns {
+	return healthFromPaneTail(lastLines(snap, 20), oauthCredentialsState(time.Now())), nil
+}
+
+// authErrorPatterns are pane strings indicating the Claude session hit an
+// auth failure at some point. The TUI transcript keeps rendering them long
+// after the underlying incident is over, so a match alone must not be
+// treated as the current state — see healthFromPaneTail.
+var authErrorPatterns = []string{
+	"API Error: 401",
+	"authentication_error",
+	"OAuth token has expired",
+	"Please run /login",
+}
+
+// recoverableErrorPatterns are transient failures a session restart can clear.
+var recoverableErrorPatterns = []string{
+	"API Error: 403",
+	"overloaded_error",
+	"Could not connect",
+}
+
+func matchPattern(tail string, patterns []string) string {
+	for _, pat := range patterns {
 		if strings.Contains(tail, pat) {
-			recoverable := true
-			if pat == "API Error: 401" || pat == "authentication_error" || pat == "OAuth token has expired" || pat == "Please run /login" {
-				recoverable = false
-			}
-			summary := fmt.Sprintf("session error: %s", pat)
-			if !recoverable {
-				summary = "Claude Code login expired; run /login in the server session"
-			}
-			return agent.HealthStatus{
-				OK:          false,
-				Recoverable: recoverable,
-				Summary:     summary,
-			}, nil
+			return pat
 		}
 	}
+	return ""
+}
 
+// healthFromPaneTail classifies session health from the last rendered pane
+// lines. Auth-error text is only trusted as "login expired" when the on-disk
+// credentials cannot refute it: stale error output from a since-resolved
+// incident stays on screen indefinitely, and treating it as current state
+// has crash-looped daemons whose credentials were long since valid again.
+// With an unexpired OAuth token on disk, the auth text is downgraded to a
+// recoverable failure so the caller restarts the session — clearing the pane
+// while --resume preserves the conversation — instead of demanding a manual
+// /login that already happened.
+func healthFromPaneTail(tail string, creds credentialsState) agent.HealthStatus {
+	if pat := matchPattern(tail, authErrorPatterns); pat != "" {
+		if creds == credentialsValid {
+			return agent.HealthStatus{
+				OK:          false,
+				Recoverable: true,
+				Summary:     fmt.Sprintf("pane shows auth error text (%s) but an unexpired OAuth token is on disk; restart session to clear stale output", pat),
+			}
+		}
+		return agent.HealthStatus{
+			OK:          false,
+			Recoverable: false,
+			Summary:     "Claude Code login expired; run /login in the server session",
+		}
+	}
+	if pat := matchPattern(tail, recoverableErrorPatterns); pat != "" {
+		return agent.HealthStatus{
+			OK:          false,
+			Recoverable: true,
+			Summary:     fmt.Sprintf("session error: %s", pat),
+		}
+	}
 	return agent.HealthStatus{
 		OK:          true,
 		Recoverable: true,
 		Summary:     "ok",
-	}, nil
+	}
 }
 
 // RestartSession kills the existing session and starts a fresh one.
