@@ -113,11 +113,12 @@ func (b *TmuxBridge) WaitForAwaitingInput(ctx context.Context, timeout time.Dura
 			// verdict expiring while stale auth text is on screen.
 			// Re-verify before surfacing it: a passing probe re-arms the
 			// cache and the next poll classifies normally.
-			if !b.confirmBlockedAuth(ctx) {
+			resolved, retry := resolveBlockedAuth(state, b.verifyBlockedAuth(ctx))
+			if retry {
 				unknownStableSince = time.Time{}
 				break
 			}
-			return state, nil
+			return resolved, nil
 		case agent.SessionStateAwaitingInput, agent.SessionStateBlockedIntervene:
 			return state, nil
 		case agent.SessionStateUnknownStable:
@@ -136,6 +137,23 @@ func (b *TmuxBridge) WaitForAwaitingInput(ctx context.Context, timeout time.Dura
 		}
 	}
 	return agent.SessionState{}, fmt.Errorf("timed out waiting for Claude session to become idle")
+}
+
+// resolveBlockedAuth converts the live probe result into a state callers may
+// safely act on. retry=true means the pane text was disproved and polling can
+// continue. Only an explicit auth failure preserves BlockedAuth.
+func resolveBlockedAuth(blocked agent.SessionState, verdict authProbeResult) (resolved agent.SessionState, retry bool) {
+	switch verdict {
+	case authProbeOK:
+		return agent.SessionState{}, true
+	case authProbeFailed:
+		return blocked, false
+	default:
+		return agent.SessionState{
+			Kind:    agent.SessionStateUnknownStable,
+			Summary: "pane shows auth error text, but live auth verification was inconclusive",
+		}, false
+	}
 }
 
 func (b *TmuxBridge) EnsureSession(ctx context.Context) error {
