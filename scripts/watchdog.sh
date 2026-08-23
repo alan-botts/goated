@@ -11,7 +11,6 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH:-/usr/bin:/bin:/usr/sbin:/s
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PID_FILE="$REPO_DIR/logs/goated_daemon.pid"
 GOATED_BIN="$REPO_DIR/goated"
-LOG_FILE="$REPO_DIR/logs/goated_daemon.log"
 WATCHDOG_LOG="$REPO_DIR/logs/watchdog.log"
 LOCK_DIR="$REPO_DIR/logs/.watchdog.lock"
 
@@ -49,6 +48,8 @@ etime_to_seconds() {
 # session open and block all message processing.
 reap_stuck_helpers() {
     local procs
+    # pgrep cannot return elapsed time portably; macOS ps also lacks etimes.
+    # shellcheck disable=SC2009
     procs=$(ps -axo pid=,etime=,command= 2>/dev/null \
         | grep -E 'goat send_user_(message|file)' \
         | grep -v grep || true)
