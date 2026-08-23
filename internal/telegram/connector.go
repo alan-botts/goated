@@ -50,6 +50,11 @@ type Connector struct {
 	// the (potentially blocked) runtime handler, so they work even when a
 	// message is wedging the session.
 	adminChatID int64
+
+	// Test seams for the two externally-effectful admin steps. Production uses
+	// SendMessage and adminctl.Execute when these are nil.
+	adminSend    func(context.Context, string, string) error
+	adminExecute func(string) adminctl.Result
 }
 
 type RunMode string
@@ -228,13 +233,21 @@ func (c *Connector) startUpdateWorker(ctx context.Context, handler gateway.Handl
 
 // dispatch routes one update. Owner /admin commands are handled inline on the
 // receive goroutine (the escape hatch); everything else is queued to the worker.
-func (c *Connector) dispatch(ctx context.Context, work chan<- tgbotapi.Update, update tgbotapi.Update) {
+func (c *Connector) dispatch(ctx context.Context, work chan<- tgbotapi.Update, update tgbotapi.Update) bool {
 	if c.tryHandleAdminCommand(ctx, update) {
-		return
+		return true
 	}
 	select {
 	case work <- update:
+		return true
 	case <-ctx.Done():
+		return false
+	default:
+		// Never let a full normal-work queue block the receive loop: it must
+		// remain able to receive an owner escape-hatch command. The update was
+		// already persisted by the polling loop, so record the explicit drop.
+		fmt.Fprintf(os.Stderr, "telegram: update queue full; dropped update_id=%d\n", update.UpdateID)
+		return false
 	}
 }
 
@@ -242,19 +255,35 @@ func (c *Connector) dispatch(ctx context.Context, work chan<- tgbotapi.Update, u
 // returns true if it consumed the update. Only the configured adminChatID is
 // honored, so non-owner traffic falls through to normal processing.
 func (c *Connector) tryHandleAdminCommand(ctx context.Context, update tgbotapi.Update) bool {
-	if c.adminChatID == 0 || update.Message == nil {
+	if c.adminChatID == 0 || update.Message == nil || update.Message.Chat == nil || update.Message.From == nil {
 		return false
 	}
-	if update.Message.Chat.ID != c.adminChatID {
+	// Fail closed: a configured group chat ID must never grant every member
+	// restart power. Telegram private-chat IDs match the sender's user ID, so
+	// bind both dimensions to the configured owner.
+	if update.Message.Chat.Type != "private" ||
+		update.Message.Chat.ID != c.adminChatID ||
+		int64(update.Message.From.ID) != c.adminChatID {
 		return false
 	}
 	sub, ok := adminctl.Parse(update.Message.Text)
 	if !ok {
 		return false
 	}
-	res := adminctl.Execute(sub)
+	execute := c.adminExecute
+	if execute == nil {
+		execute = adminctl.Execute
+	}
+	res := execute(sub)
 	chatID := strconv.FormatInt(update.Message.Chat.ID, 10)
-	_ = c.SendMessage(ctx, chatID, res.Reply)
+	send := c.adminSend
+	if send == nil {
+		send = c.SendMessage
+	}
+	if err := send(ctx, chatID, res.Reply); err != nil {
+		fmt.Fprintf(os.Stderr, "telegram: failed to send /admin %s receipt: %v\n", sub, err)
+		return true
+	}
 	if res.After != nil {
 		res.After()
 	}
