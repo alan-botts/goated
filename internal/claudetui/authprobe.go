@@ -43,7 +43,7 @@ const negativeProbeTTL = time.Minute
 // with at least this margin — above one 5-min gateway post-send polling
 // window plus paste/context-estimate/session-respawn overheads. Dispatches
 // that outlast even this (the gateway chains up to three polling windows on
-// retries) are covered by confirmBlockedAuth, which re-verifies an apparent
+// retries) are covered by verifyBlockedAuth, which re-verifies an apparent
 // auth block at the point it would otherwise be surfaced. cachedAuthState
 // (the polling hot path) honors the verdict until actual expiry.
 const probeRenewWindow = 8 * time.Minute
@@ -165,13 +165,13 @@ func (b *TmuxBridge) invalidateAuthProbe() {
 	b.probeMu.Unlock()
 }
 
-// confirmBlockedAuth re-checks an apparent auth block before it is surfaced
-// to callers that act on it (user-facing "login expired" messages, aborted
-// dispatches). It returns false when a probe (cached or fresh — this may block
-// up to one probe run) verifies credentials, in which case the pane text was
-// stale and the re-armed cache lets subsequent classification proceed normally.
-// The real request is authoritative for refreshed OAuth, Keychain, and API-key
-// credentials, so local credential-file state must not gate it.
-func (b *TmuxBridge) confirmBlockedAuth(ctx context.Context) bool {
-	return b.verifiedAuthState(ctx) != authProbeOK
+// verifyBlockedAuth re-checks an apparent auth block before it is surfaced to
+// callers that act on it (user-facing "login expired" messages, aborted
+// dispatches). Only authProbeFailed confirms the block. authProbeOK proves the
+// pane text stale, while authProbeInconclusive must remain ambiguous rather
+// than being promoted to a false manual-login requirement. The real request is
+// authoritative for refreshed OAuth, Keychain, and API-key credentials, so
+// local credential-file state must not gate it.
+func (b *TmuxBridge) verifyBlockedAuth(ctx context.Context) authProbeResult {
+	return b.verifiedAuthState(ctx)
 }

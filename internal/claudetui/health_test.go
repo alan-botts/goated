@@ -403,11 +403,10 @@ func TestProbeVerdictTTLSemantics(t *testing.T) {
 	}
 }
 
-// TestConfirmBlockedAuth pins the last line of defense against false
-// "login expired" escalations: an apparent auth block must be re-verified
-// (probing if needed) before being surfaced, and must stand when the
-// a real request cannot refute it.
-func TestConfirmBlockedAuth(t *testing.T) {
+// TestVerifyBlockedAuth pins the last line of defense against false "login
+// expired" escalations: an apparent block must be re-verified, and only a
+// conclusive failed request may confirm it.
+func TestVerifyBlockedAuth(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("refuted when creds valid and probe passes", func(t *testing.T) {
@@ -416,8 +415,8 @@ func TestConfirmBlockedAuth(t *testing.T) {
 			WorkspaceDir: t.TempDir(),
 			authProbe:    func(context.Context, string) authProbeResult { return authProbeOK },
 		}
-		if b.confirmBlockedAuth(ctx) {
-			t.Error("confirmBlockedAuth() = true, want refuted (false)")
+		if got := b.verifyBlockedAuth(ctx); got != authProbeOK {
+			t.Errorf("verifyBlockedAuth() = %v, want authProbeOK", got)
 		}
 		if got := b.cachedAuthState(); got != authProbeOK {
 			t.Errorf("cachedAuthState() after refutation = %v, want authProbeOK (cache must be re-armed)", got)
@@ -430,43 +429,57 @@ func TestConfirmBlockedAuth(t *testing.T) {
 			WorkspaceDir: t.TempDir(),
 			authProbe:    func(context.Context, string) authProbeResult { return authProbeFailed },
 		}
-		if !b.confirmBlockedAuth(ctx) {
-			t.Error("confirmBlockedAuth() = false, want confirmed (true) for revoked token")
+		if got := b.verifyBlockedAuth(ctx); got != authProbeFailed {
+			t.Errorf("verifyBlockedAuth() = %v, want authProbeFailed", got)
 		}
 	})
 
-	t.Run("stands when probe is inconclusive — only a passing probe refutes", func(t *testing.T) {
+	t.Run("remains ambiguous when probe is inconclusive", func(t *testing.T) {
 		t.Setenv("CLAUDE_CONFIG_DIR", credsDir(t, time.Now().Add(time.Hour)))
 		b := &TmuxBridge{
 			WorkspaceDir: t.TempDir(),
 			authProbe:    func(context.Context, string) authProbeResult { return authProbeInconclusive },
 		}
-		if !b.confirmBlockedAuth(ctx) {
-			t.Error("confirmBlockedAuth() = false, want confirmed (true): an inconclusive probe must not refute a genuine auth block")
+		if got := b.verifyBlockedAuth(ctx); got != authProbeInconclusive {
+			t.Errorf("verifyBlockedAuth() = %v, want authProbeInconclusive", got)
 		}
 	})
 
 	t.Run("refuted when expired OAuth refreshes and probe passes", func(t *testing.T) {
 		t.Setenv("CLAUDE_CONFIG_DIR", credsDir(t, time.Now().Add(-time.Hour)))
 		b := &TmuxBridge{WorkspaceDir: t.TempDir(), authProbe: func(context.Context, string) authProbeResult { return authProbeOK }}
-		if b.confirmBlockedAuth(ctx) {
-			t.Error("confirmBlockedAuth() = true, want refuted after successful refresh probe")
+		if got := b.verifyBlockedAuth(ctx); got != authProbeOK {
+			t.Errorf("verifyBlockedAuth() = %v, want authProbeOK after refresh", got)
 		}
 	})
 
 	t.Run("refuted when Keychain or API-key credentials pass probe", func(t *testing.T) {
 		t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 		b := &TmuxBridge{WorkspaceDir: t.TempDir(), authProbe: func(context.Context, string) authProbeResult { return authProbeOK }}
-		if b.confirmBlockedAuth(ctx) {
-			t.Error("confirmBlockedAuth() = true, want refuted by authoritative probe")
+		if got := b.verifyBlockedAuth(ctx); got != authProbeOK {
+			t.Errorf("verifyBlockedAuth() = %v, want authProbeOK", got)
 		}
 	})
+}
+
+func TestResolveBlockedAuthOnlySurfacesConfirmedFailure(t *testing.T) {
+	blocked := agent.SessionState{Kind: agent.SessionStateBlockedAuth, Summary: "run /login"}
+
+	if got, retry := resolveBlockedAuth(blocked, authProbeOK); !retry || got.Kind != "" {
+		t.Fatalf("passing probe resolved to (%+v, retry=%v), want retry", got, retry)
+	}
+	if got, retry := resolveBlockedAuth(blocked, authProbeFailed); retry || got.Kind != agent.SessionStateBlockedAuth {
+		t.Fatalf("failed probe resolved to (%+v, retry=%v), want confirmed BlockedAuth", got, retry)
+	}
+	if got, retry := resolveBlockedAuth(blocked, authProbeInconclusive); retry || got.Kind != agent.SessionStateUnknownStable {
+		t.Fatalf("inconclusive probe resolved to (%+v, retry=%v), want UnknownStable", got, retry)
+	}
 }
 
 // TestMidDispatchVerdictExpiryRecovers replays round-4's chained-retry
 // scenario end to end at the bridge layer: a verdict expires mid-poll while
 // stale auth text is on screen, classification flips to BlockedAuth, and the
-// confirmBlockedAuth re-verification path re-arms the cache so the next poll
+// verifyBlockedAuth re-verification path re-arms the cache so the next poll
 // classifies normally instead of surfacing a false "login expired".
 func TestMidDispatchVerdictExpiryRecovers(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", credsDir(t, time.Now().Add(24*time.Hour)))
@@ -493,8 +506,8 @@ func TestMidDispatchVerdictExpiryRecovers(t *testing.T) {
 		t.Fatalf("expired verdict should classify BlockedAuth first, got %v", got.Kind)
 	}
 	// WaitForAwaitingInput's re-verification refutes the block...
-	if b.confirmBlockedAuth(ctx) {
-		t.Fatal("confirmBlockedAuth() = true, want refuted on healthy credentials")
+	if got := b.verifyBlockedAuth(ctx); got != authProbeOK {
+		t.Fatalf("verifyBlockedAuth() = %v, want authProbeOK", got)
 	}
 	if calls != 2 {
 		t.Errorf("probe calls = %d, want 2 (admission + one re-verification)", calls)
