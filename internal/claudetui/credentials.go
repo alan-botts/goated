@@ -13,15 +13,14 @@ type credentialsState int
 
 const (
 	// credentialsUnknown means no readable credential file — e.g. macOS
-	// Keychain storage, API-key auth, or a corrupt file. Pane text cannot be
-	// second-guessed in this state.
+	// Keychain storage, API-key auth, or a corrupt file. The live auth probe,
+	// rather than this local metadata, determines whether pane text is stale.
 	credentialsUnknown credentialsState = iota
 	// credentialsValid means an unexpired OAuth token is on disk.
 	credentialsValid
 	// credentialsExpired means the on-disk token is past its expiry. Claude
-	// Code may still auto-refresh it with the refresh token, so this never
-	// confirms that a manual /login is required — it just fails to rule it
-	// out.
+	// Code may still auto-refresh it with the refresh token, so the live probe
+	// remains authoritative and this state is diagnostic only.
 	credentialsExpired
 )
 

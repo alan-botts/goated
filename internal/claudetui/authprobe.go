@@ -167,13 +167,11 @@ func (b *TmuxBridge) invalidateAuthProbe() {
 
 // confirmBlockedAuth re-checks an apparent auth block before it is surfaced
 // to callers that act on it (user-facing "login expired" messages, aborted
-// dispatches). It returns false when the block is refuted: the on-disk token
-// is unexpired and a probe (cached or fresh — this may block up to one probe
-// run) verifies credentials, in which case the pane text was stale and the
-// re-armed cache lets subsequent classification proceed normally.
+// dispatches). It returns false when a probe (cached or fresh — this may block
+// up to one probe run) verifies credentials, in which case the pane text was
+// stale and the re-armed cache lets subsequent classification proceed normally.
+// The real request is authoritative for refreshed OAuth, Keychain, and API-key
+// credentials, so local credential-file state must not gate it.
 func (b *TmuxBridge) confirmBlockedAuth(ctx context.Context) bool {
-	if oauthCredentialsState(time.Now()) != credentialsValid {
-		return true
-	}
 	return b.verifiedAuthState(ctx) != authProbeOK
 }
