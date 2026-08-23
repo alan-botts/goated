@@ -52,6 +52,10 @@ const (
 	RunModeWebhook RunMode = "webhook"
 )
 
+// telegramHTTPTimeout bounds every Telegram Bot API call. It must stay above the
+// 30s getUpdates long-poll (see u.Timeout below) while still capping a hung send.
+const telegramHTTPTimeout = 60 * time.Second
+
 type WebhookOptions struct {
 	PublicURL  string
 	ListenAddr string
@@ -63,6 +67,14 @@ func NewConnector(token string, allowedChatIDs []int64, store OffsetStore, attac
 	if err != nil {
 		return nil, fmt.Errorf("init telegram bot: %w", err)
 	}
+
+	// Bound every Telegram API call at the transport layer. tgbotapi's default
+	// client has no timeout, so an unreachable api.telegram.org (TLS handshake
+	// timeouts, etc.) blocks bot.Send forever — which hangs the daemon socket
+	// handler, the goat send_user_message client, and the runtime that spawned
+	// it, wedging all message processing. Must exceed the getUpdates long-poll
+	// (u.Timeout = 30s) so normal polling isn't cut short.
+	bot.Client = &http.Client{Timeout: telegramHTTPTimeout}
 
 	rootPath := strings.TrimSpace(attachmentCfg.RootPath)
 	if rootPath == "" {
