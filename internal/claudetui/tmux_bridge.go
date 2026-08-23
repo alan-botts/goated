@@ -367,12 +367,11 @@ func (b *TmuxBridge) classifySessionState(snap1, snap2 string) agent.SessionStat
 	tail := lastLines(snap2, 20)
 	switch {
 	// Auth-error text in the pane may be stale transcript output from a
-	// since-resolved incident. Suppress BlockedAuth only when the on-disk
-	// token is unexpired AND a recent headless probe (run by GetHealth,
-	// which gates dispatch) proved credentials actually work; this method
-	// runs in 2s polling loops, so it never probes itself.
-	case matchPattern(tail, authErrorPatterns) != "" &&
-		!(oauthCredentialsState(time.Now()) == credentialsValid && b.cachedAuthState() == authProbeOK):
+	// since-resolved incident. Suppress BlockedAuth when a recent headless
+	// probe (run by GetHealth, which gates dispatch) proved credentials work.
+	// The probe is authoritative across OAuth refresh, Keychain, and API-key
+	// auth; this polling hot path never probes by itself.
+	case matchPattern(tail, authErrorPatterns) != "" && b.cachedAuthState() != authProbeOK:
 		return agent.SessionState{
 			Kind:    agent.SessionStateBlockedAuth,
 			Summary: "Claude Code login expired; run /login in the server session",
@@ -470,37 +469,33 @@ func matchPattern(tail string, patterns []string) string {
 // lines. Auth-error text alone is not trusted as "login expired": stale
 // error output from a since-resolved incident stays on screen indefinitely,
 // and treating it as current state has crash-looped daemons whose
-// credentials were long since valid again. When the on-disk OAuth token is
-// unexpired, verifyAuth (a cached headless probe — a real request, so it
-// also catches tokens revoked server-side while still valid-looking on
-// disk) settles it: probe OK means the text is provably stale and the
-// session is healthy (normal traffic scrolls the text away); probe failure
-// means login really is required. Expired or unreadable credentials skip
-// the probe and keep the original non-recoverable classification.
+// credentials were long since valid again. verifyAuth is a cached real request,
+// so it is authoritative even when an OAuth access token needs refreshing or
+// credentials live in macOS Keychain/API-key environment state. Probe OK means
+// the text is provably stale; probe failure means login really is required.
+// An inconclusive probe remains recoverable rather than converting ambiguous
+// local credential metadata into a false manual-login requirement.
 func healthFromPaneTail(tail string, creds credentialsState, verifyAuth func() authProbeResult) agent.HealthStatus {
 	if pat := matchPattern(tail, authErrorPatterns); pat != "" {
-		if creds == credentialsValid {
-			switch verifyAuth() {
-			case authProbeOK:
-				return agent.HealthStatus{
-					OK:          true,
-					Recoverable: true,
-					Summary:     fmt.Sprintf("ok (pane shows stale auth error text (%s); headless probe verified credentials)", pat),
-				}
-			case authProbeFailed:
-				// fall through to the non-recoverable classification below
-			default:
-				return agent.HealthStatus{
-					OK:          false,
-					Recoverable: true,
-					Summary:     fmt.Sprintf("pane shows auth error text (%s) with an unexpired OAuth token on disk, but auth verification was inconclusive; will retry", pat),
-				}
+		switch verifyAuth() {
+		case authProbeOK:
+			return agent.HealthStatus{
+				OK:          true,
+				Recoverable: true,
+				Summary:     fmt.Sprintf("ok (pane shows stale auth error text (%s); headless probe verified credentials)", pat),
 			}
-		}
-		return agent.HealthStatus{
-			OK:          false,
-			Recoverable: false,
-			Summary:     "Claude Code login expired; run /login in the server session",
+		case authProbeFailed:
+			return agent.HealthStatus{
+				OK:          false,
+				Recoverable: false,
+				Summary:     "Claude Code login expired; run /login in the server session",
+			}
+		default:
+			return agent.HealthStatus{
+				OK:          false,
+				Recoverable: true,
+				Summary:     fmt.Sprintf("pane shows auth error text (%s); auth verification was inconclusive (credential state: %s); will retry", pat, credentialsStateName(creds)),
+			}
 		}
 	}
 	if pat := matchPattern(tail, recoverableErrorPatterns); pat != "" {
@@ -514,6 +509,17 @@ func healthFromPaneTail(tail string, creds credentialsState, verifyAuth func() a
 		OK:          true,
 		Recoverable: true,
 		Summary:     "ok",
+	}
+}
+
+func credentialsStateName(state credentialsState) string {
+	switch state {
+	case credentialsValid:
+		return "unexpired-oauth"
+	case credentialsExpired:
+		return "expired-oauth"
+	default:
+		return "unknown"
 	}
 }
 

@@ -138,17 +138,24 @@ func TestHealthFromPaneTail(t *testing.T) {
 			false, true, "inconclusive",
 		},
 		{
-			"auth text with unknown credentials stays non-recoverable without probing",
+			"auth text with unknown local credentials and passing probe is healthy",
 			paneWithStaleAuthError,
 			credentialsUnknown,
-			func(t *testing.T) func() authProbeResult { return probeMustNotRun(t) },
-			false, false, "run /login",
+			probeReturning(authProbeOK),
+			true, true, "headless probe verified credentials",
 		},
 		{
-			"auth text with expired credentials stays non-recoverable without probing",
+			"auth text with refreshable expired credentials and passing probe is healthy",
 			paneWithStaleAuthError,
 			credentialsExpired,
-			func(t *testing.T) func() authProbeResult { return probeMustNotRun(t) },
+			probeReturning(authProbeOK),
+			true, true, "headless probe verified credentials",
+		},
+		{
+			"auth text with unknown credentials and failed probe requires login",
+			paneWithStaleAuthError,
+			credentialsUnknown,
+			probeReturning(authProbeFailed),
 			false, false, "run /login",
 		},
 		{
@@ -169,7 +176,7 @@ func TestHealthFromPaneTail(t *testing.T) {
 			"auth text takes precedence over transient errors",
 			"authentication_error\noverloaded_error\n❯",
 			credentialsUnknown,
-			func(t *testing.T) func() authProbeResult { return probeMustNotRun(t) },
+			probeReturning(authProbeFailed),
 			false, false, "run /login",
 		},
 		{
@@ -399,7 +406,7 @@ func TestProbeVerdictTTLSemantics(t *testing.T) {
 // TestConfirmBlockedAuth pins the last line of defense against false
 // "login expired" escalations: an apparent auth block must be re-verified
 // (probing if needed) before being surfaced, and must stand when the
-// credentials cannot refute it.
+// a real request cannot refute it.
 func TestConfirmBlockedAuth(t *testing.T) {
 	ctx := context.Background()
 
@@ -439,19 +446,19 @@ func TestConfirmBlockedAuth(t *testing.T) {
 		}
 	})
 
-	t.Run("stands without probing when creds are expired", func(t *testing.T) {
+	t.Run("refuted when expired OAuth refreshes and probe passes", func(t *testing.T) {
 		t.Setenv("CLAUDE_CONFIG_DIR", credsDir(t, time.Now().Add(-time.Hour)))
-		b := &TmuxBridge{WorkspaceDir: t.TempDir(), authProbe: probeNever(t)}
-		if !b.confirmBlockedAuth(ctx) {
-			t.Error("confirmBlockedAuth() = false, want confirmed (true) for expired creds")
+		b := &TmuxBridge{WorkspaceDir: t.TempDir(), authProbe: func(context.Context, string) authProbeResult { return authProbeOK }}
+		if b.confirmBlockedAuth(ctx) {
+			t.Error("confirmBlockedAuth() = true, want refuted after successful refresh probe")
 		}
 	})
 
-	t.Run("stands without probing when creds are unknown", func(t *testing.T) {
+	t.Run("refuted when Keychain or API-key credentials pass probe", func(t *testing.T) {
 		t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
-		b := &TmuxBridge{WorkspaceDir: t.TempDir(), authProbe: probeNever(t)}
-		if !b.confirmBlockedAuth(ctx) {
-			t.Error("confirmBlockedAuth() = false, want confirmed (true) for unknown creds")
+		b := &TmuxBridge{WorkspaceDir: t.TempDir(), authProbe: func(context.Context, string) authProbeResult { return authProbeOK }}
+		if b.confirmBlockedAuth(ctx) {
+			t.Error("confirmBlockedAuth() = true, want refuted by authoritative probe")
 		}
 	})
 }
@@ -542,21 +549,21 @@ func TestHealthFromSnapshotWiring(t *testing.T) {
 		}
 	})
 
-	t.Run("stale auth text with expired on-disk creds is non-recoverable without probing", func(t *testing.T) {
+	t.Run("stale auth text with expired on-disk creds is healthy after refresh probe", func(t *testing.T) {
 		t.Setenv("CLAUDE_CONFIG_DIR", credsDir(t, time.Now().Add(-time.Hour)))
-		b := &TmuxBridge{WorkspaceDir: t.TempDir(), authProbe: probeNever(t)}
+		b := &TmuxBridge{WorkspaceDir: t.TempDir(), authProbe: func(context.Context, string) authProbeResult { return authProbeOK }}
 		got := b.healthFromSnapshot(ctx, paneWithStaleAuthError)
-		if got.OK || got.Recoverable {
-			t.Errorf("healthFromSnapshot() = {OK:%v Recoverable:%v}, want non-recoverable failure", got.OK, got.Recoverable)
+		if !got.OK {
+			t.Errorf("healthFromSnapshot() = {OK:false Summary:%q}, want OK:true", got.Summary)
 		}
 	})
 
-	t.Run("stale auth text with no creds file is non-recoverable without probing", func(t *testing.T) {
+	t.Run("stale auth text with no creds file is healthy when alternate auth passes", func(t *testing.T) {
 		t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
-		b := &TmuxBridge{WorkspaceDir: t.TempDir(), authProbe: probeNever(t)}
+		b := &TmuxBridge{WorkspaceDir: t.TempDir(), authProbe: func(context.Context, string) authProbeResult { return authProbeOK }}
 		got := b.healthFromSnapshot(ctx, paneWithStaleAuthError)
-		if got.OK || got.Recoverable {
-			t.Errorf("healthFromSnapshot() = {OK:%v Recoverable:%v}, want non-recoverable failure", got.OK, got.Recoverable)
+		if !got.OK {
+			t.Errorf("healthFromSnapshot() = {OK:false Summary:%q}, want OK:true", got.Summary)
 		}
 	})
 
@@ -570,8 +577,8 @@ func TestHealthFromSnapshotWiring(t *testing.T) {
 }
 
 // TestClassifySessionState pins the GetSessionState half of the fix: the
-// BlockedAuth gate must consult both the on-disk credentials and the cached
-// probe verdict, and the newly unified "API Error: 401" pattern must match.
+// BlockedAuth gate must consult the cached authoritative probe verdict, and the
+// newly unified "API Error: 401" pattern must match.
 func TestClassifySessionState(t *testing.T) {
 	seedProbeOK := func(t *testing.T, b *TmuxBridge) {
 		t.Helper()
@@ -600,13 +607,13 @@ func TestClassifySessionState(t *testing.T) {
 		}
 	})
 
-	t.Run("auth text with expired creds blocks even with a cached verdict", func(t *testing.T) {
+	t.Run("auth text with refreshed expired creds honors cached passing verdict", func(t *testing.T) {
 		b := &TmuxBridge{WorkspaceDir: t.TempDir()}
 		seedProbeOK(t, b)
 		t.Setenv("CLAUDE_CONFIG_DIR", credsDir(t, time.Now().Add(-time.Hour)))
 		got := b.classifySessionState(paneWithStaleAuthError, paneWithStaleAuthError)
-		if got.Kind != agent.SessionStateBlockedAuth {
-			t.Errorf("Kind = %v, want BlockedAuth", got.Kind)
+		if got.Kind != agent.SessionStateAwaitingInput {
+			t.Errorf("Kind = %v, want AwaitingInput", got.Kind)
 		}
 	})
 
