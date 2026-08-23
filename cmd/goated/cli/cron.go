@@ -323,7 +323,7 @@ var cronSetTimezoneCmd = &cobra.Command{
 
 var cronSetModelCmd = &cobra.Command{
 	Use:   "set-model ID [MODEL]",
-	Short: "Set or clear the model a cron runs with; omit MODEL (or pass \"\") to use the daemon default",
+	Short: "Set or clear the model a cron runs with; omit MODEL (or pass \"\") to use the runtime default",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 || len(args) > 2 {
 			return fmt.Errorf("accepts ID [MODEL]")
@@ -350,7 +350,7 @@ var cronSetModelCmd = &cobra.Command{
 			return err
 		}
 		if strings.TrimSpace(model) == "" {
-			fmt.Printf("Cleared model for cron %d (using daemon default)\n", id)
+			fmt.Printf("Cleared model for cron %d (using runtime default)\n", id)
 		} else {
 			fmt.Printf("Set cron %d model to %s\n", id, model)
 		}
@@ -458,7 +458,7 @@ func init() {
 	cronAddCmd.Flags().StringVar(&cronAddPrompt, "prompt", "", "Inline prompt to execute (subagent)")
 	cronAddCmd.Flags().StringVar(&cronAddPromptFile, "prompt-file", "", "Path to a prompt file (subagent)")
 	cronAddCmd.Flags().StringVar(&cronAddCommand, "command", "", "Shell command to run (system)")
-	cronAddCmd.Flags().StringVar(&cronAddModel, "model", "", "Optional model to run this cron with (e.g. claude-haiku-4-5). Empty uses the daemon default.")
+	cronAddCmd.Flags().StringVar(&cronAddModel, "model", "", "Optional model to run this cron with (e.g. claude-haiku-4-5). Empty uses the runtime default.")
 	cronAddCmd.Flags().StringVar(&cronAddTimezone, "timezone", "", "IANA timezone (e.g. UTC, America/Los_Angeles). Defaults to GOAT_DEFAULT_TIMEZONE.")
 	cronAddCmd.Flags().BoolVar(&cronAddSilent, "silent", false, "Deprecated legacy shorthand: disable both user and main-session success notifications")
 	cronAddCmd.Flags().BoolVar(&cronAddNotifyUser, "notify-user", false, "Notify the user directly for this cron")

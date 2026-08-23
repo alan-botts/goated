@@ -43,7 +43,7 @@ type CronJob struct {
 	Prompt            string `json:"prompt,omitempty"`
 	PromptFile        string `json:"prompt_file,omitempty"`
 	Command           string `json:"command,omitempty"` // shell command for type="system"
-	Model             string `json:"model,omitempty"`   // optional per-cron model override; empty means daemon default
+	Model             string `json:"model,omitempty"`   // optional per-cron model override; empty means runtime default
 	Timezone          string `json:"timezone"`
 	Silent            bool   `json:"silent,omitempty"` // legacy field, lazily migrated
 	Active            bool   `json:"active"`

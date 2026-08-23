@@ -99,10 +99,10 @@ Use Goated cron for all recurring work. Do **not** use any runtime-native schedu
 - Enable cron: `./goat cron enable <id>`
 - Remove cron: `./goat cron remove <id>`
 - Set the model for an existing cron: `./goat cron set-model <id> claude-haiku-4-5`
-- Clear a cron's model (revert to daemon default): `./goat cron set-model <id>`
+- Clear a cron's model (revert to the runtime default): `./goat cron set-model <id>`
 
 The optional `--model` flag selects which model that cron runs with. Leave it
-unset to use the daemon's default model. When set, the model is shown in
+unset to use the selected runtime's default model. When set, the model is shown in
 `cron list` output (e.g. `model=claude-haiku-4-5`).
 
 ## Subagents
