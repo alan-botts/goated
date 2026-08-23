@@ -286,33 +286,37 @@ func (r *SessionRuntime) sendEnvelope(ctx context.Context, envelope string) erro
 	go func() {
 		runErr := cmd.Wait()
 		outFile.Close()
-
-		stderr := stderrBuf.String()
-
-		// Parse session_id from JSON output and save for future --resume
-		if sid := parseSessionID(stdoutBuf.String()); sid != "" {
-			_ = r.writeSessionID(sid)
-		}
-
-		// If the session's stored previous_message_id is corrupt (happens when
-		// a prior run was interrupted before an assistant response was written),
-		// drop the session so the next retry creates a fresh one without --resume.
-		if strings.Contains(stderr, "diagnostics.previous_message_id") {
-			fmt.Fprintf(os.Stderr, "[%s] bad previous_message_id — clearing session for fresh start\n",
-				time.Now().Format(time.RFC3339))
-			_ = os.Remove(r.sessionIDPath())
-		}
-
-		r.mu.Lock()
-		r.proc = nil
-		r.procErr = runErr
-		r.lastStderr = stderr
-		r.mu.Unlock()
+		r.recordRunCompletion(stdoutBuf.String(), stderrBuf.String(), runErr)
 
 		close(done)
 	}()
 
 	return nil
+}
+
+// recordRunCompletion applies the persistent and in-memory state transitions
+// from a finished claude process. Keeping them together makes the corrupt
+// previous_message_id recovery contract directly testable.
+func (r *SessionRuntime) recordRunCompletion(stdout, stderr string, runErr error) {
+	// Parse session_id from JSON output and save for future --resume.
+	if sid := parseSessionID(stdout); sid != "" {
+		_ = r.writeSessionID(sid)
+	}
+
+	// If the session's stored previous_message_id is corrupt (happens when a
+	// prior run was interrupted before an assistant response was written), drop
+	// the session so the gateway's retry creates a fresh one without --resume.
+	if strings.Contains(stderr, "diagnostics.previous_message_id") {
+		fmt.Fprintf(os.Stderr, "[%s] bad previous_message_id — clearing session for fresh start\n",
+			time.Now().Format(time.RFC3339))
+		_ = os.Remove(r.sessionIDPath())
+	}
+
+	r.mu.Lock()
+	r.proc = nil
+	r.procErr = runErr
+	r.lastStderr = stderr
+	r.mu.Unlock()
 }
 
 func (r *SessionRuntime) WaitForAwaitingInput(ctx context.Context, timeout time.Duration) (agent.SessionState, error) {
