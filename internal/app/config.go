@@ -53,9 +53,13 @@ type Config struct {
 	DBPath                          string
 	LogDir                          string
 	AgentRuntime                    string
-	Model                           string // claude CLI --model value (e.g. "sonnet", "opus", "claude-opus-4-6")
-	CodexModel                      string // codex config model override (e.g. "gpt-6-sol")
-	CodexModelReasoningEffort       string // codex config model_reasoning_effort override (e.g. "medium")
+	Model                           string   // claude CLI --model value (e.g. "sonnet", "opus", "claude-opus-4-6")
+	CodexModel                      string   // codex config model override (e.g. "gpt-6-sol")
+	CodexModelReasoningEffort       string   // codex config model_reasoning_effort override (e.g. "medium")
+	CodexArgs                       []string // raw Codex CLI args shared by all launch modes
+	CodexExecArgs                   []string // raw args for fresh/headless exec
+	CodexResumeArgs                 []string // raw args for exec resume
+	CodexTUIArgs                    []string // raw args for interactive TUI
 	TelegramBotToken                string
 	Gateway                         string
 	TelegramMode                    string
@@ -123,6 +127,10 @@ func LoadConfig() Config {
 	v.SetDefault("model", "")
 	v.SetDefault("codex.model", "")
 	v.SetDefault("codex.model_reasoning_effort", "")
+	v.SetDefault("codex.args", []string{})
+	v.SetDefault("codex.exec_args", []string{})
+	v.SetDefault("codex.resume_args", []string{})
+	v.SetDefault("codex.tui_args", []string{})
 	v.SetDefault("default_timezone", "America/Los_Angeles")
 	v.SetDefault("workspace_dir", "")
 	v.SetDefault("db_path", "")
@@ -151,6 +159,10 @@ func LoadConfig() Config {
 	v.BindEnv("model", "GOAT_MODEL")
 	v.BindEnv("codex.model", "GOAT_CODEX_MODEL")
 	v.BindEnv("codex.model_reasoning_effort", "GOAT_CODEX_MODEL_REASONING_EFFORT")
+	v.BindEnv("codex.args", "GOAT_CODEX_ARGS")
+	v.BindEnv("codex.exec_args", "GOAT_CODEX_EXEC_ARGS")
+	v.BindEnv("codex.resume_args", "GOAT_CODEX_RESUME_ARGS")
+	v.BindEnv("codex.tui_args", "GOAT_CODEX_TUI_ARGS")
 	v.BindEnv("default_timezone", "GOAT_DEFAULT_TIMEZONE")
 	v.BindEnv("workspace_dir", "GOAT_WORKSPACE_DIR")
 	v.BindEnv("db_path", "GOAT_DB_PATH")
@@ -266,6 +278,10 @@ func LoadConfig() Config {
 		Model:                           model,
 		CodexModel:                      strings.TrimSpace(v.GetString("codex.model")),
 		CodexModelReasoningEffort:       strings.TrimSpace(v.GetString("codex.model_reasoning_effort")),
+		CodexArgs:                       v.GetStringSlice("codex.args"),
+		CodexExecArgs:                   v.GetStringSlice("codex.exec_args"),
+		CodexResumeArgs:                 v.GetStringSlice("codex.resume_args"),
+		CodexTUIArgs:                    v.GetStringSlice("codex.tui_args"),
 		TelegramBotToken:                loadCred(credsDir, "GOAT_TELEGRAM_BOT_TOKEN"),
 		Gateway:                         v.GetString("gateway"),
 		TelegramMode:                    v.GetString("telegram.mode"),

@@ -7,8 +7,15 @@
   "log_dir": "/path/to/goated/logs",
   "model": "opus",
   "codex": {
-    "model": "gpt-6-sol",
-    "model_reasoning_effort": "medium"
+    "args": [
+      "-m",
+      "gpt-6-sol",
+      "-c",
+      "model_reasoning_effort=\"medium\""
+    ],
+    "exec_args": [],
+    "resume_args": [],
+    "tui_args": []
   },
   "slack": {
     "channel_id": "YOUR_SLACK_CHANNEL_ID"

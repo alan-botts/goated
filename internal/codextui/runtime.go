@@ -42,6 +42,21 @@ func NewSessionRuntime(workspaceDir, logDir string, config codexconfig.Config) *
 	}
 }
 
+func sessionLaunchCommand(workspaceDir string, config codexconfig.Config) string {
+	args := []string{
+		"--no-alt-screen",
+		"--sandbox", "danger-full-access",
+		"--ask-for-approval", "never",
+		"-c", `model_instructions_file="GOATED.md"`,
+	}
+	args = append(args, config.LaunchArgs("tui")...)
+	quoted := make([]string, 0, len(args))
+	for _, arg := range args {
+		quoted = append(quoted, "'"+strings.ReplaceAll(arg, "'", "'\"'\"'")+"'")
+	}
+	return fmt.Sprintf(`cd %q && export LOG_CALLER=main-session && codex %s`, workspaceDir, strings.Join(quoted, " "))
+}
+
 func (s *SessionRuntime) Descriptor() agent.RuntimeDescriptor {
 	return agent.RuntimeDescriptor{
 		Provider:    agent.RuntimeCodexTUI,
@@ -69,10 +84,7 @@ func (s *SessionRuntime) EnsureSession(ctx context.Context) error {
 
 	session := s.sessionName()
 	if !tmux.SessionExistsFor(ctx, session) {
-		cmd := fmt.Sprintf(
-			`cd %q && export LOG_CALLER=main-session && codex --no-alt-screen --sandbox danger-full-access --ask-for-approval never -c 'model_instructions_file="GOATED.md"'`,
-			s.WorkspaceDir,
-		)
+		cmd := sessionLaunchCommand(s.WorkspaceDir, s.CodexConfig)
 		if err := tmux.Run(ctx, "new-session", "-d", "-s", session, cmd); err != nil {
 			return fmt.Errorf("start codex tmux session: %w", err)
 		}

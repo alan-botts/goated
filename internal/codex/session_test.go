@@ -15,3 +15,12 @@ func TestSessionPromptArgsFreshUsesConfiguredModel(t *testing.T) {
 		t.Fatalf("promptArgs() = %#v, want %#v", got, want)
 	}
 }
+
+func TestSessionPromptArgsResumeUsesModeSpecificFlags(t *testing.T) {
+	r := NewSessionRuntime("/tmp/workspace", "/tmp/logs", codexconfig.Config{Args: []string{"--enable", "foo"}, ResumeArgs: []string{"--all"}, ExecArgs: []string{"--skip-git-repo-check"}})
+	got := r.promptArgs("thread-123", "hello")
+	want := []string{"exec", "resume", "--json", "--dangerously-bypass-approvals-and-sandbox", "-c", `model_instructions_file="GOATED.md"`, "--enable", "foo", "--all", "thread-123", "hello"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("promptArgs(resume) = %#v, want %#v", got, want)
+	}
+}

@@ -530,4 +530,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for build and PR expectations.
 
 ## Codex model configuration
 
-Set `codex.model` and `codex.model_reasoning_effort` in `goated.json` (or `GOAT_CODEX_MODEL` and `GOAT_CODEX_MODEL_REASONING_EFFORT`). Goated passes them explicitly to Codex main sessions, headless subagents, and cron work.
+Goated uses Viper-backed `goated.json`. Set raw CLI tokens under `codex.args` to apply them to every Codex launch, with optional `codex.exec_args`, `codex.resume_args`, and `codex.tui_args` for flags accepted only by those modes. Put *each token* in its own JSON string; Goated does not split strings or invoke a shell for headless commands. The TUI path shell-quotes every token. For example:
+
+```json
+"codex": {
+  "args": ["-m", "gpt-6-sol", "-c", "model_reasoning_effort=\"medium\""],
+  "exec_args": ["--skip-git-repo-check"]
+}
+```
+
+`codex.model` and `codex.model_reasoning_effort` (or their `GOAT_CODEX_MODEL` and `GOAT_CODEX_MODEL_REASONING_EFFORT` env overrides) remain supported for existing installs. Raw flags are appended after those named overrides. Codex CLI itself determines which flags are valid for each mode; an invalid flag makes that launch fail. The daemon must be restarted to load changed Goated config.

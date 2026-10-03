@@ -85,7 +85,7 @@ func (r *SessionRuntime) freshExecArgs() []string {
 		"--dangerously-bypass-approvals-and-sandbox",
 		"-c", `model_instructions_file="GOATED.md"`,
 	}
-	return append(args, r.codexConfig.OverrideArgs()...)
+	return append(args, r.codexConfig.LaunchArgs("exec")...)
 }
 
 func (r *SessionRuntime) promptArgs(threadID string, prompt string) []string {
@@ -96,7 +96,7 @@ func (r *SessionRuntime) promptArgs(threadID string, prompt string) []string {
 			"--dangerously-bypass-approvals-and-sandbox",
 			"-c", `model_instructions_file="GOATED.md"`,
 		}
-		args = append(args, r.codexConfig.OverrideArgs()...)
+		args = append(args, r.codexConfig.LaunchArgs("resume")...)
 		return append(args, threadID, prompt)
 	}
 	args := append([]string{"exec"}, r.freshExecArgs()...)

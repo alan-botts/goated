@@ -50,7 +50,7 @@ func New(cfg app.Config) (agent.Runtime, error) {
 			descriptor: session.Descriptor(),
 		}, nil
 	case agent.RuntimeCodex:
-		codexCfg := codexconfig.Config{Model: cfg.CodexModel, ModelReasoningEffort: cfg.CodexModelReasoningEffort}
+		codexCfg := codexconfig.Config{Model: cfg.CodexModel, ModelReasoningEffort: cfg.CodexModelReasoningEffort, Args: cfg.CodexArgs, ExecArgs: cfg.CodexExecArgs, ResumeArgs: cfg.CodexResumeArgs, TUIArgs: cfg.CodexTUIArgs}
 		session := codex.NewSessionRuntime(cfg.WorkspaceDir, cfg.LogDir, codexCfg)
 		headless := codex.NewHeadlessRuntime(cfg.WorkspaceDir, codexCfg)
 		return &runtimeImpl{
@@ -59,7 +59,7 @@ func New(cfg app.Config) (agent.Runtime, error) {
 			descriptor: session.Descriptor(),
 		}, nil
 	case agent.RuntimeCodexTUI:
-		codexCfg := codexconfig.Config{Model: cfg.CodexModel, ModelReasoningEffort: cfg.CodexModelReasoningEffort}
+		codexCfg := codexconfig.Config{Model: cfg.CodexModel, ModelReasoningEffort: cfg.CodexModelReasoningEffort, Args: cfg.CodexArgs, ExecArgs: cfg.CodexExecArgs, ResumeArgs: cfg.CodexResumeArgs, TUIArgs: cfg.CodexTUIArgs}
 		session := codextui.NewSessionRuntime(cfg.WorkspaceDir, cfg.LogDir, codexCfg)
 		headless := codextui.NewHeadlessRuntime(cfg.WorkspaceDir, codexCfg)
 		return &runtimeImpl{

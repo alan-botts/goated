@@ -24,7 +24,7 @@ func headlessArgs(config codexconfig.Config) []string {
 		"--dangerously-bypass-approvals-and-sandbox",
 		"-c", `model_instructions_file="GOATED.md"`,
 	}
-	return append(args, config.OverrideArgs()...)
+	return append(args, config.LaunchArgs("exec")...)
 }
 
 func NewHeadlessRuntime(workspaceDir string, config codexconfig.Config) *HeadlessRuntime {

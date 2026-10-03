@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -78,6 +79,10 @@ func TestLoadConfigResolvesRelativePathsFromConfigFile(t *testing.T) {
 		"slack": map[string]any{
 			"attachments_root": "workspace/tmp/slack/attachments",
 		},
+		"codex": map[string]any{
+			"args":      []string{"-m", "gpt-6-sol", "-c", `model_reasoning_effort="medium"`},
+			"exec_args": []string{"--skip-git-repo-check"},
+		},
 	}
 	data, err := json.Marshal(config)
 	if err != nil {
@@ -93,8 +98,8 @@ func TestLoadConfigResolvesRelativePathsFromConfigFile(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldwd) }()
 
-	if err := os.Chdir(workspace); err != nil {
-		t.Fatalf("chdir workspace: %v", err)
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir root: %v", err)
 	}
 
 	cfg := LoadConfig()
@@ -102,6 +107,12 @@ func TestLoadConfigResolvesRelativePathsFromConfigFile(t *testing.T) {
 	assertSamePath(t, cfg.DBPath, filepath.Join(root, "goated.db"))
 	assertSamePath(t, cfg.LogDir, filepath.Join(root, "logs"))
 	assertSamePath(t, cfg.SlackAttachmentsRoot, filepath.Join(root, "workspace", "tmp", "slack", "attachments"))
+	if !reflect.DeepEqual(cfg.CodexArgs, []string{"-m", "gpt-6-sol", "-c", `model_reasoning_effort="medium"`}) {
+		t.Fatalf("CodexArgs = %#v", cfg.CodexArgs)
+	}
+	if !reflect.DeepEqual(cfg.CodexExecArgs, []string{"--skip-git-repo-check"}) {
+		t.Fatalf("CodexExecArgs = %#v", cfg.CodexExecArgs)
+	}
 }
 
 func TestEnsureLocalBinPathsPrependsExistingDirs(t *testing.T) {
