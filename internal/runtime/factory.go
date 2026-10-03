@@ -8,6 +8,7 @@ import (
 	"goated/internal/claude"
 	"goated/internal/claudetui"
 	"goated/internal/codex"
+	"goated/internal/codexconfig"
 	"goated/internal/codextui"
 	"goated/internal/pi"
 )
@@ -49,16 +50,18 @@ func New(cfg app.Config) (agent.Runtime, error) {
 			descriptor: session.Descriptor(),
 		}, nil
 	case agent.RuntimeCodex:
-		session := codex.NewSessionRuntime(cfg.WorkspaceDir, cfg.LogDir)
-		headless := codex.NewHeadlessRuntime(cfg.WorkspaceDir)
+		codexCfg := codexconfig.Config{Model: cfg.CodexModel, ModelReasoningEffort: cfg.CodexModelReasoningEffort}
+		session := codex.NewSessionRuntime(cfg.WorkspaceDir, cfg.LogDir, codexCfg)
+		headless := codex.NewHeadlessRuntime(cfg.WorkspaceDir, codexCfg)
 		return &runtimeImpl{
 			session:    session,
 			headless:   headless,
 			descriptor: session.Descriptor(),
 		}, nil
 	case agent.RuntimeCodexTUI:
-		session := codextui.NewSessionRuntime(cfg.WorkspaceDir, cfg.LogDir)
-		headless := codextui.NewHeadlessRuntime(cfg.WorkspaceDir)
+		codexCfg := codexconfig.Config{Model: cfg.CodexModel, ModelReasoningEffort: cfg.CodexModelReasoningEffort}
+		session := codextui.NewSessionRuntime(cfg.WorkspaceDir, cfg.LogDir, codexCfg)
+		headless := codextui.NewHeadlessRuntime(cfg.WorkspaceDir, codexCfg)
 		return &runtimeImpl{
 			session:    session,
 			headless:   headless,

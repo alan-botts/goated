@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"goated/internal/agent"
+	"goated/internal/codexconfig"
 	"goated/internal/msglog"
 )
 
@@ -20,6 +21,7 @@ type SessionRuntime struct {
 	workspaceDir string
 	logDir       string
 	redactor     *msglog.Redactor
+	codexConfig  codexconfig.Config
 
 	mu         sync.Mutex
 	proc       *exec.Cmd
@@ -28,12 +30,13 @@ type SessionRuntime struct {
 	done       chan struct{}
 }
 
-func NewSessionRuntime(workspaceDir, logDir string) *SessionRuntime {
+func NewSessionRuntime(workspaceDir, logDir string, config codexconfig.Config) *SessionRuntime {
 	credsDir := filepath.Join(workspaceDir, "creds")
 	return &SessionRuntime{
 		workspaceDir: workspaceDir,
 		logDir:       logDir,
 		redactor:     msglog.NewRedactor(credsDir),
+		codexConfig:  config,
 	}
 }
 
@@ -76,12 +79,13 @@ func (r *SessionRuntime) writeThreadID(id string) error {
 }
 
 func (r *SessionRuntime) freshExecArgs() []string {
-	return []string{
+	args := []string{
 		"--json",
 		"--sandbox", "danger-full-access",
 		"--dangerously-bypass-approvals-and-sandbox",
 		"-c", `model_instructions_file="GOATED.md"`,
 	}
+	return append(args, r.codexConfig.OverrideArgs()...)
 }
 
 func (r *SessionRuntime) promptArgs(threadID string, prompt string) []string {
@@ -92,6 +96,7 @@ func (r *SessionRuntime) promptArgs(threadID string, prompt string) []string {
 			"--dangerously-bypass-approvals-and-sandbox",
 			"-c", `model_instructions_file="GOATED.md"`,
 		}
+		args = append(args, r.codexConfig.OverrideArgs()...)
 		return append(args, threadID, prompt)
 	}
 	args := append([]string{"exec"}, r.freshExecArgs()...)

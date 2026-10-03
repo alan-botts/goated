@@ -6,6 +6,10 @@
   "gateway": "slack",
   "log_dir": "/path/to/goated/logs",
   "model": "opus",
+  "codex": {
+    "model": "gpt-6-sol",
+    "model_reasoning_effort": "medium"
+  },
   "slack": {
     "channel_id": "YOUR_SLACK_CHANNEL_ID"
   },

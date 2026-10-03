@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"goated/internal/agent"
+	"goated/internal/codexconfig"
 	"goated/internal/sessionname"
 	"goated/internal/tmux"
 	"goated/internal/util"
@@ -26,16 +27,18 @@ type SessionRuntime struct {
 	WorkspaceDir string
 	LogDir       string
 	SessionName  string
+	CodexConfig  codexconfig.Config
 
 	mu         sync.Mutex
 	lastSendAt time.Time
 }
 
-func NewSessionRuntime(workspaceDir, logDir string) *SessionRuntime {
+func NewSessionRuntime(workspaceDir, logDir string, config codexconfig.Config) *SessionRuntime {
 	return &SessionRuntime{
 		WorkspaceDir: workspaceDir,
 		LogDir:       logDir,
 		SessionName:  sessionname.CodexTUI(workspaceDir),
+		CodexConfig:  config,
 	}
 }
 

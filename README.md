@@ -527,3 +527,7 @@ See [SECURITY.md](SECURITY.md) for private vulnerability reporting guidance.
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for build and PR expectations.
+
+## Codex model configuration
+
+Set `codex.model` and `codex.model_reasoning_effort` in `goated.json` (or `GOAT_CODEX_MODEL` and `GOAT_CODEX_MODEL_REASONING_EFFORT`). Goated passes them explicitly to Codex main sessions, headless subagents, and cron work.

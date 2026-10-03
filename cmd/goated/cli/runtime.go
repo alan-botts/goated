@@ -42,6 +42,17 @@ var runtimeStatusCmd = &cobra.Command{
 			version = "(unknown)"
 		}
 		fmt.Printf("Version: %s\n", version)
+		if cfg.CodexModel != "" || cfg.CodexModelReasoningEffort != "" {
+			model := cfg.CodexModel
+			if model == "" {
+				model = "(Codex CLI default)"
+			}
+			effort := cfg.CodexModelReasoningEffort
+			if effort == "" {
+				effort = "(Codex CLI default)"
+			}
+			fmt.Printf("Codex override: model=%s reasoning_effort=%s\n", model, effort)
+		}
 
 		fmt.Printf("Capabilities: interactive=%t context=%t compact=%t reset=%t\n",
 			runtime.Descriptor().Capabilities.SupportsInteractiveSession,

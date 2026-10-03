@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"goated/internal/agent"
+	"goated/internal/codexconfig"
 	"goated/internal/db"
 	"goated/internal/sessionname"
 	"goated/internal/subagent"
@@ -13,23 +14,25 @@ import (
 
 type HeadlessRuntime struct {
 	WorkspaceDir string
+	CodexConfig  codexconfig.Config
 }
 
-func headlessArgs() []string {
-	return []string{
+func headlessArgs(config codexconfig.Config) []string {
+	args := []string{
 		"exec",
 		"--sandbox", "danger-full-access",
 		"--dangerously-bypass-approvals-and-sandbox",
 		"-c", `model_instructions_file="GOATED.md"`,
 	}
+	return append(args, config.OverrideArgs()...)
 }
 
-func NewHeadlessRuntime(workspaceDir string) *HeadlessRuntime {
-	return &HeadlessRuntime{WorkspaceDir: workspaceDir}
+func NewHeadlessRuntime(workspaceDir string, config codexconfig.Config) *HeadlessRuntime {
+	return &HeadlessRuntime{WorkspaceDir: workspaceDir, CodexConfig: config}
 }
 
 func (h *HeadlessRuntime) Descriptor() agent.RuntimeDescriptor {
-	return NewSessionRuntime(h.WorkspaceDir, "").Descriptor()
+	return NewSessionRuntime(h.WorkspaceDir, "", h.CodexConfig).Descriptor()
 }
 
 func (h *HeadlessRuntime) RunSync(ctx context.Context, store *db.Store, req agent.HeadlessRequest) (agent.HeadlessResult, error) {
@@ -38,7 +41,7 @@ func (h *HeadlessRuntime) RunSync(ctx context.Context, store *db.Store, req agen
 	cmd := exec.CommandContext(
 		ctx,
 		"codex",
-		append(headlessArgs(), req.Prompt)...,
+		append(headlessArgs(h.CodexConfig), req.Prompt)...,
 	)
 	cmd.Dir = workspaceDir
 
@@ -73,11 +76,7 @@ func (h *HeadlessRuntime) RunBackground(store *db.Store, req agent.HeadlessReque
 	workspaceDir := chooseWorkspace(req.WorkspaceDir, h.WorkspaceDir)
 	cmd := exec.Command(
 		"codex",
-		"exec",
-		"--sandbox", "danger-full-access",
-		"--dangerously-bypass-approvals-and-sandbox",
-		"-c", `model_instructions_file="GOATED.md"`,
-		req.Prompt,
+		append(headlessArgs(h.CodexConfig), req.Prompt)...,
 	)
 	cmd.Dir = workspaceDir
 
